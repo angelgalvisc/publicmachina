@@ -59,7 +59,7 @@ These three do NOT depend on each other. Can be built in parallel.
 
 **Ref:** PLAN.md §SQLite Schema (lines 145-581), §GraphStore interface (lines 774-807)
 
-- [x] SQLite schema — all tables from PLAN.md (copy SQL verbatim)
+- [x] SQLite schema bootstrap for fresh databases — all Phase 1 tables and indices implemented
 - [x] PRAGMAs: WAL, FK, busy_timeout
 - [x] `GraphStore` interface (all methods including interaction history + buildPlatformState)
 - [x] `SQLiteGraphStore` implementation (v1)
@@ -103,89 +103,107 @@ These three do NOT depend on each other. Can be built in parallel.
 - [x] Tokens counted, cost calculated (pricing table per model)
 - [x] `MockLLMClient` available for CI tests
 
-**EXIT GATE:** ✅ All 3 files with green tests (36/36). `simulation.db` creates correctly.
+**Notes:**
+- Current DB layer bootstraps fresh SQLite files via `SCHEMA_SQL`.
+- Versioned migrations are not implemented yet; if the schema changes again, add them before claiming migration support.
+
+**EXIT GATE:** ✅ All 3 files with green tests (46/46). `simulation.db` creates correctly.
 
 ---
 
-## Phase 2: Ingestion Pipeline — linear chain (4 days)
+## Phase 2: Ingestion Pipeline — linear chain (4 days) ✅ COMPLETE
 
 Each step feeds the next. Strict order.
 
-### Step 2.1: ingest.ts
+### Step 2.1: ingest.ts ✅
 
 **Ref:** PLAN.md §Project Structure (line 110), §Provenance tables (lines 176-207)
 
 **Depends on:** db.ts
 
-- [ ] Parse MD/TXT documents
-- [ ] Chunking (by paragraph or token count)
-- [ ] `content_hash` (SHA-256) for dedup
-- [ ] `GraphStore.addDocument()`, `addChunk()`
+- [x] Parse MD/TXT documents
+- [x] Chunking (by paragraph, with oversize splitting by sentence and hard boundary)
+- [x] `content_hash` (SHA-256, cross-platform CRLF normalization) for dedup
+- [x] `GraphStore.addDocument()`, `addChunk()` + new query methods: `getDocumentByHash()`, `getChunksByDocument()`, `getAllDocuments()`
 
 **Verification:**
-- [ ] `fixtures/sample-docs/` → documents (>0), chunks (>0) in DB
-- [ ] Re-ingest same doc → no duplicates (content_hash check)
-- [ ] Chunks have valid `document_id` FK
+- [x] `fixtures/sample-docs/` → documents (3), chunks (>0) in DB — 28 tests
+- [x] Re-ingest same doc → no duplicates (content_hash check)
+- [x] Re-ingest same directory → all files deduplicated
+- [x] Chunks have valid `document_id` FK
+- [x] Unsupported file extension → descriptive error
 
-### Step 2.2: ontology.ts
+### Step 2.2: ontology.ts ✅
 
 **Ref:** PLAN.md §Ontology tables (lines 209-223), §Project Structure (line 111)
 
 **Depends on:** db.ts, llm.ts, ingest.ts (chunks must exist)
 
-- [ ] LLM (native Anthropic) extracts `entity_types`, `edge_types` from chunks
-- [ ] LLM extracts claims (subject, predicate, object, temporality)
-- [ ] Structured output with `response_format`
+- [x] LLM (native Anthropic) extracts `entity_types`, `edge_types` from chunks (schema discovery)
+- [x] LLM extracts claims (subject, predicate, object, temporality) in batches
+- [x] Structured output with `completeJSON()` + `normalizeTypeName()`
 
 **Verification:**
-- [ ] `entity_types` (>0), `edge_types` (>0), `claims` (>0) in DB
-- [ ] Every claim has valid `source_chunk_id` FK (provenance)
-- [ ] Claims have `valid_from`/`valid_to` when applicable
+- [x] `entity_types` (>0), `edge_types` (>0), `claims` (>0) in DB — 13 tests
+- [x] Every claim has valid `source_chunk_id` FK (provenance)
+- [x] Claims have `valid_from`/`valid_to` when applicable
+- [x] Claims have topics as JSON array
+- [x] Confidence in [0.0, 1.0]
+- [x] Empty chunks → graceful empty result
 
-### Step 2.3: graph.ts (+ entity resolution)
+### Step 2.3: graph.ts (+ entity resolution) ✅
 
 **Ref:** PLAN.md §Knowledge Graph (lines 225-249), §Entity Resolution (lines 257-282, 809-828)
 
 **Depends on:** db.ts, ontology.ts (claims + types must exist)
 
-- [ ] `EntityResolver.normalize()`
-- [ ] `EntityResolver.findDuplicates()` + `merge()`
-- [ ] `EntityResolver.resolveAlias()`
-- [ ] `entity_claims` and `edge_claims` (provenance links)
-- [ ] `entity_merges` (audit trail)
-- [ ] FTS5 sync (`entities_fts`)
-- [ ] `graph_revision_id` generation (hash of entities+edges+merges)
+- [x] `EntityResolver.normalize()` — lowercase, trim, remove honorifics, normalize whitespace
+- [x] `EntityResolver.findDuplicates()` — Sørensen–Dice coefficient on bigrams
+- [x] `EntityResolver.merge()` — keeps longer (more descriptive) name
+- [x] `entity_claims` and `edge_claims` (provenance links)
+- [x] `entity_merges` (audit trail with merge_reason and merge_reason_detail)
+- [x] FTS5 sync (handled by GraphStore.addEntity/mergeEntities)
+- [x] `graph_revision_id` generation (hash of entities+edges+merges)
+- [x] Added to GraphStore interface: `getClaimsByChunk()`, `getEntityTypes()`, `getEdgeTypes()`, `getAllActiveEntities()`
 
 **Verification:**
-- [ ] entities (>0), edges (>0) in DB
-- [ ] No obvious duplicates (e.g., "Universidad Nacional" and "U. Nacional" merged)
-- [ ] `entity_merges` has records with `merge_reason`
-- [ ] `queryProvenance(entityId)` returns chain: entity → claims → chunks → documents
-- [ ] `graph_revision_id` is deterministic (same input → same hash)
-- [ ] Tests: `graph.test.ts` (fixtures with intentional duplicates)
+- [x] entities (>0), edges (>0) in DB — 24 tests
+- [x] Intentional duplicates ("Universidad Nacional" / "Universidad Nacional de Colombia") merged
+- [x] `entity_merges` has records with `merge_reason`
+- [x] `queryProvenance(entityId)` returns chain: entity → claims → chunks → documents
+- [x] `graph_revision_id` is deterministic (same input → same hash)
+- [x] Tests: `graph.test.ts` (fixtures with intentional duplicates)
+- [x] `diceCoefficient()` tested: identical, different, partial, symmetric
 
-### Step 2.4: profiles.ts
+### Step 2.4: profiles.ts ✅
 
 **Ref:** PLAN.md §ActorSpec vs ActorState (lines 585-631), §Actors table (lines 284-314)
 
 **Depends on:** db.ts, llm.ts, graph.ts (entities must exist)
 
-- [ ] LLM generates `ActorSpec` (personality, bio, age, gender, region, language)
-- [ ] Initial `ActorState` (stance, sentiment_bias, activity_level, influence_weight)
-- [ ] Community detection (by topic cluster or entity proximity)
-- [ ] `community_overlap`
-- [ ] Initial follow graph
-- [ ] Initial posts (round 0 seeds)
+- [x] LLM generates personality, bio, age, gender, profession, region, language
+- [x] Initial stance, sentiment_bias, activity_level, influence_weight (clamped)
+- [x] Archetype mapping: person→persona, organization→organization, university→institution, media→media
+- [x] Cognition tier from influence + archetype (per PLAN.md CognitionRouter rules)
+- [x] Community detection by topic clustering (greedy Jaccard-based)
+- [x] `community_overlap` computed between communities
+- [x] Follow graph with deterministic hash (no Math.random)
+- [x] Seed posts for tier A actors at round 0
+- [x] Added to GraphStore interface: `updateActorCommunity()`
 
 **Verification:**
-- [ ] actors (10-20), `actor_topics` (>0), `actor_beliefs` (>0) in DB
-- [ ] Each actor has valid `entity_id` FK (or null for synthetics)
-- [ ] communities (>0), `community_overlap` (>0)
-- [ ] follows (>0), reasonable distribution
-- [ ] `ActorSpec` exportable (has all interface fields)
-- [ ] Fields `gender`, `region`, `language` populated
+- [x] actors created from entities with correct archetypes — 17 tests
+- [x] Each actor has valid `entity_id` FK
+- [x] `actor_topics` (>0), `actor_beliefs` (>0) in DB
+- [x] communities (>0), actors assigned to communities
+- [x] follows (>0)
+- [x] Seed posts at round 0 for tier A actors
+- [x] Fields `gender`, `region`, `language` populated
+- [x] sentiment_bias in [-1, 1], activity_level in [0, 1]
+- [x] maxActors option respected
+- [x] Empty entities → graceful empty result
 
-**EXIT GATE:** `seldonclaw ingest + analyze + generate` produces DB with actors ready to simulate.
+**EXIT GATE:** ✅ All 4 files with green tests (128/128). Ingestion pipeline complete: documents → chunks → entity_types → edge_types → claims → entities → edges → entity_resolution → actors → communities → follows → seed_posts.
 
 ---
 

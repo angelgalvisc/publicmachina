@@ -812,6 +812,7 @@ export interface GraphStore {
   getActor(actorId: string): ActorRow | null;
   getActorsByRun(runId: string): ActorRow[];
   updateActorStance(actorId: string, stance: string): void;
+  updateActorCommunity(actorId: string, communityId: string): void;
   addActorTopic(actorId: string, topic: string, weight: number): void;
   addActorBelief(
     actorId: string,
@@ -944,6 +945,17 @@ export interface GraphStore {
 
   // FTS
   searchEntities(query: string, limit?: number): Entity[];
+
+  // Provenance queries (for ingest dedup + downstream)
+  getDocumentByHash(contentHash: string): DocumentRecord | null;
+  getChunksByDocument(documentId: string): Chunk[];
+  getAllDocuments(): DocumentRecord[];
+
+  // Graph queries (for graph.ts)
+  getClaimsByChunk(chunkId: string): Claim[];
+  getEntityTypes(): EntityType[];
+  getEdgeTypes(): EdgeType[];
+  getAllActiveEntities(): Entity[];
 
   // Utility
   close(): void;
@@ -1301,6 +1313,12 @@ export class SQLiteGraphStore implements GraphStore {
     this.db
       .prepare(`UPDATE actors SET stance = ? WHERE id = ?`)
       .run(stance, actorId);
+  }
+
+  updateActorCommunity(actorId: string, communityId: string): void {
+    this.db
+      .prepare(`UPDATE actors SET community_id = ? WHERE id = ?`)
+      .run(communityId, actorId);
   }
 
   addActorTopic(actorId: string, topic: string, weight: number): void {
@@ -1955,6 +1973,55 @@ export class SQLiteGraphStore implements GraphStore {
          LIMIT ?`
       )
       .all(query, limit) as Entity[];
+  }
+
+  // ─── Provenance queries ───
+
+  getDocumentByHash(contentHash: string): DocumentRecord | null {
+    const row = this.db
+      .prepare(`SELECT * FROM documents WHERE content_hash = ?`)
+      .get(contentHash) as DocumentRecord | undefined;
+    return row ?? null;
+  }
+
+  getChunksByDocument(documentId: string): Chunk[] {
+    return this.db
+      .prepare(
+        `SELECT * FROM chunks WHERE document_id = ? ORDER BY chunk_index ASC`
+      )
+      .all(documentId) as Chunk[];
+  }
+
+  getAllDocuments(): DocumentRecord[] {
+    return this.db
+      .prepare(`SELECT * FROM documents ORDER BY ingested_at ASC`)
+      .all() as DocumentRecord[];
+  }
+
+  // ─── Graph queries ───
+
+  getClaimsByChunk(chunkId: string): Claim[] {
+    return this.db
+      .prepare(`SELECT * FROM claims WHERE source_chunk_id = ?`)
+      .all(chunkId) as Claim[];
+  }
+
+  getEntityTypes(): EntityType[] {
+    return this.db
+      .prepare(`SELECT * FROM entity_types`)
+      .all() as EntityType[];
+  }
+
+  getEdgeTypes(): EdgeType[] {
+    return this.db
+      .prepare(`SELECT * FROM edge_types`)
+      .all() as EdgeType[];
+  }
+
+  getAllActiveEntities(): Entity[] {
+    return this.db
+      .prepare(`SELECT * FROM entities WHERE merged_into IS NULL`)
+      .all() as Entity[];
   }
 
   // ─── Utility ───

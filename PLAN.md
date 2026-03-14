@@ -100,7 +100,7 @@ MiroFish (github.com/666ghj/MiroFish) is a pioneering social simulation engine w
 seldonclaw/
 ├── src/
 │   ├── index.ts              # Entry point + CLI (commander)
-│   ├── db.ts                 # SQLite schema, migrations, GraphStore interface + SQLiteGraphStore
+│   ├── db.ts                 # SQLite schema bootstrap, GraphStore interface + SQLiteGraphStore
 │   ├── config.ts             # Config loader (seldonclaw.config.yaml) + sanitizeForStorage()
 │   ├── llm.ts                # Multi-provider LLM client (Anthropic native + OpenAI compat)
 │   ├── ingest.ts             # Document parsing (MD/TXT, optional PDF)
@@ -359,22 +359,26 @@ CREATE TABLE edge_claims (
   FOREIGN KEY (claim_id) REFERENCES claims(id)
 );
 
--- Communities
+-- Communities (scoped by run_id)
 CREATE TABLE communities (
   id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL,
   name TEXT NOT NULL,
   description TEXT,
-  cohesion REAL DEFAULT 0.5          -- 0.0 to 1.0 (echo chamber strength)
+  cohesion REAL DEFAULT 0.5,         -- 0.0 to 1.0 (echo chamber strength)
+  FOREIGN KEY (run_id) REFERENCES run_manifest(id)
 );
 
--- Community overlap (normalized, not JSON)
+-- Community overlap (normalized, not JSON, scoped by run_id)
 CREATE TABLE community_overlap (
   community_a TEXT NOT NULL,
   community_b TEXT NOT NULL,
+  run_id TEXT NOT NULL,
   weight REAL NOT NULL,               -- 0.0 to 1.0
-  PRIMARY KEY (community_a, community_b),
+  PRIMARY KEY (community_a, community_b, run_id),
   FOREIGN KEY (community_a) REFERENCES communities(id),
-  FOREIGN KEY (community_b) REFERENCES communities(id)
+  FOREIGN KEY (community_b) REFERENCES communities(id),
+  FOREIGN KEY (run_id) REFERENCES run_manifest(id)
 );
 
 -- ═══════════════════════════════════════
