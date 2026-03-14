@@ -25,6 +25,7 @@ import type {
   EntityType,
   EdgeType,
 } from "./db.js";
+import { stableId } from "./db.js";
 import type { LLMClient } from "./llm.js";
 
 // ═══════════════════════════════════════════════════════
@@ -246,7 +247,7 @@ export async function buildKnowledgeGraph(
 
   for (const [normalizedName, rawEntity] of entityMap) {
     const entityId = store.addEntity({
-      id: "",
+      id: stableId("entity", rawEntity.type, normalizedName),
       type: rawEntity.type,
       name: rawEntity.name,
       attributes: rawEntity.attributes
@@ -294,7 +295,7 @@ export async function buildKnowledgeGraph(
       }
 
       const edgeId = store.addEdge({
-        id: "",
+        id: stableId("edge", edgeType, sourceId, targetId, claim.id),
         type: edgeType,
         source_id: sourceId,
         target_id: targetId,

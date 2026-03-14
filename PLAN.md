@@ -100,6 +100,7 @@ MiroFish (github.com/666ghj/MiroFish) is a pioneering social simulation engine w
 seldonclaw/
 ├── src/
 │   ├── index.ts              # Entry point + CLI (commander)
+│   ├── tools.ts              # Operator tools layer: typed handlers reused by CLI, shell, future UI
 │   ├── db.ts                 # SQLite schema bootstrap, GraphStore interface + SQLiteGraphStore
 │   ├── config.ts             # Config loader (seldonclaw.config.yaml) + sanitizeForStorage()
 │   ├── llm.ts                # Multi-provider LLM client (Anthropic native + OpenAI compat)
@@ -150,7 +151,9 @@ PRAGMA busy_timeout=5000;
 ```
 
 **ID Policy:**
-- All IDs are **globally unique UUIDs v4** across runs
+- Structural IDs are deterministic **UUID-like stable IDs** derived from SHA-256 over canonical inputs
+- Same canonical inputs → same ID; different inputs → different ID
+- Run-scoped artifacts may intentionally include `run_id` in the ID derivation when identity is per-run
 - Derived tables (posts, follows, exposures, narratives, telemetry, rounds) carry a `run_id` FK
 - Static graph tables (documents, chunks, claims, entities, edges) are shared across runs
 - Rule: `SELECT * FROM posts WHERE run_id = ?` never mixes runs
@@ -1593,6 +1596,59 @@ seldonclaw import-agent --bundle ./agent-bundle/ --db simulation.db --run <run-i
 # Interactive shell (conversational REPL)
 seldonclaw shell --db simulation.db --run <run-id>
 ```
+
+## Operator Tools Layer
+
+**Principle:** the internal pipeline remains modular (`ingest.ts`, `graph.ts`, `engine.ts`, etc.), but the
+user-facing interfaces should not call those modules ad hoc. Instead, SeldonClaw exposes a thin layer of
+typed operator tools that all interfaces reuse:
+
+- structured CLI (`index.ts`)
+- conversational shell (`shell.ts`)
+- future web UI or API
+
+These are **tools**, not CKP "skills". They are runtime-facing handlers for operating SeldonClaw; they do
+not replace the core modules and they are not part of the actor cognition model.
+
+```typescript
+type OperatorToolName =
+  | "run_pipeline"
+  | "ingest_documents"
+  | "analyze_corpus"
+  | "generate_actors"
+  | "simulate_run"
+  | "report_run"
+  | "inspect_actor"
+  | "interview_actor"
+  | "export_agent_bundle"
+  | "import_agent_bundle"
+  | "replay_run"
+  | "get_stats";
+
+interface OperatorTool<Input, Output> {
+  name: OperatorToolName;
+  description: string;
+  validate(input: unknown): Input;
+  execute(input: Input, ctx: ToolContext): Promise<Output>;
+}
+```
+
+**Rules:**
+- CLI subcommands remain the canonical deterministic interface.
+- `shell.ts` translates natural language into typed tool invocations, not direct module calls.
+- A future frontend reuses the same tool handlers instead of duplicating orchestration logic.
+- Tools may compose core modules, but core modules must remain independently testable.
+- No arbitrary shell execution from natural language; free text only maps to allowed tools.
+
+**Examples of tool mappings:**
+- `run_pipeline` → `ingest.ts` → `ontology.ts` → `graph.ts` → `profiles.ts` → `engine.ts`
+- `simulate_run` → `engine.ts`
+- `inspect_actor` → `db.ts` + actor state projection
+- `interview_actor` → `interview.ts` + `CognitionBackend`
+- `export_agent_bundle` / `import_agent_bundle` → `ckp.ts`
+
+**Implementation timing:** this layer is defined now as an architectural boundary, but it is implemented
+with the CLI/shell phase, not before Phase 2. The core pipeline comes first.
 
 ## Dependencies
 

@@ -14,6 +14,7 @@
  */
 
 import type { GraphStore, Chunk, EntityType, EdgeType, Claim } from "./db.js";
+import { stableId } from "./db.js";
 import type { LLMClient } from "./llm.js";
 
 // ═══════════════════════════════════════════════════════
@@ -51,8 +52,6 @@ export interface OntologyOptions {
   schemaSampleSize?: number;
   /** Max chunks to process for claim extraction (0 = all, default: 0) */
   maxClaimsChunks?: number;
-  /** Batch size for claim extraction (how many chunks per LLM call, default: 3) */
-  claimsBatchSize?: number;
 }
 
 export interface OntologyResult {
@@ -67,7 +66,6 @@ export interface OntologyResult {
 // ═══════════════════════════════════════════════════════
 
 const DEFAULT_SCHEMA_SAMPLE_SIZE = 10;
-const DEFAULT_CLAIMS_BATCH_SIZE = 3;
 
 // ═══════════════════════════════════════════════════════
 // PROMPTS
@@ -217,30 +215,23 @@ export async function extractOntology(
     store.addEdgeType(et);
   }
 
-  // 3. Claim extraction from all chunks (or limited set)
+  // 3. Claim extraction — one chunk at a time for exact provenance.
+  //    Each chunk gets its own LLM call so every claim has a precise source_chunk_id.
   const maxChunks = options.maxClaimsChunks ?? 0;
   const chunksToProcess =
     maxChunks > 0 ? allChunks.slice(0, maxChunks) : allChunks;
-  const batchSize = options.claimsBatchSize ?? DEFAULT_CLAIMS_BATCH_SIZE;
 
   const entityTypeNames = entityTypes.map((et) => et.name);
   let totalClaims = 0;
 
-  for (let i = 0; i < chunksToProcess.length; i += batchSize) {
-    const batch = chunksToProcess.slice(i, i + batchSize);
-    const batchTexts = batch.map((c) => c.content);
+  for (const chunk of chunksToProcess) {
+    const claims = await extractClaims(llm, [chunk.content], entityTypeNames);
 
-    const claims = await extractClaims(llm, batchTexts, entityTypeNames);
-
-    // Persist claims — link each to the first chunk in the batch as source
-    // (More precise chunk-level attribution could use per-claim chunk matching)
-    for (const claim of claims) {
-      // Find the best source chunk: the one whose content contains the subject
-      const sourceChunk = findBestSourceChunk(batch, claim.subject) ?? batch[0];
-
+    for (let ci = 0; ci < claims.length; ci++) {
+      const claim = claims[ci];
       store.addClaim({
-        id: "",
-        source_chunk_id: sourceChunk.id,
+        id: stableId("claim", chunk.id, claim.subject, claim.predicate, claim.object, String(ci)),
+        source_chunk_id: chunk.id,
         subject: claim.subject,
         predicate: claim.predicate,
         object: claim.object,
@@ -367,22 +358,6 @@ export function normalizeTypeName(name: string): string {
     .toLowerCase()
     .replace(/\s+/g, "_")
     .replace(/[^a-z0-9_]/g, "");
-}
-
-/**
- * Find the chunk whose content most likely contains information about a subject.
- */
-function findBestSourceChunk(
-  chunks: Chunk[],
-  subject: string
-): Chunk | null {
-  const subjectLower = subject.toLowerCase();
-  for (const chunk of chunks) {
-    if (chunk.content.toLowerCase().includes(subjectLower)) {
-      return chunk;
-    }
-  }
-  return null;
 }
 
 /**

@@ -1,0 +1,615 @@
+{
+  "name": "seldonclaw-data-model",
+  "version": "0.1.0",
+  "source": {
+    "schema_file": "/Users/agc/Documents/seldonclaw/src/db.ts",
+    "schema_kind": "sqlite",
+    "status": "manual_snapshot"
+  },
+  "layers": [
+    {
+      "name": "provenance",
+      "tables": ["documents", "chunks", "claims"]
+    },
+    {
+      "name": "ontology_graph",
+      "tables": [
+        "entity_types",
+        "edge_types",
+        "entities",
+        "edges",
+        "entity_aliases",
+        "entity_merges",
+        "entity_claims",
+        "edge_claims",
+        "entities_fts"
+      ]
+    },
+    {
+      "name": "social_simulation",
+      "tables": [
+        "actors",
+        "actor_topics",
+        "actor_beliefs",
+        "communities",
+        "community_overlap",
+        "posts",
+        "post_topics",
+        "follows",
+        "exposures",
+        "exposure_summary",
+        "narratives"
+      ]
+    },
+    {
+      "name": "observability",
+      "tables": ["telemetry", "rounds"]
+    },
+    {
+      "name": "reproducibility",
+      "tables": ["run_manifest", "decision_cache", "snapshots"]
+    }
+  ],
+  "tables": [
+    {
+      "name": "documents",
+      "kind": "table",
+      "scope": "shared",
+      "primary_key": ["id"],
+      "columns": [
+        {"name": "id", "type": "TEXT", "nullable": false},
+        {"name": "filename", "type": "TEXT", "nullable": false},
+        {"name": "content_hash", "type": "TEXT", "nullable": false},
+        {"name": "mime_type", "type": "TEXT", "nullable": true},
+        {"name": "ingested_at", "type": "TEXT", "nullable": true},
+        {"name": "metadata", "type": "TEXT", "nullable": true}
+      ]
+    },
+    {
+      "name": "chunks",
+      "kind": "table",
+      "scope": "shared",
+      "primary_key": ["id"],
+      "columns": [
+        {"name": "id", "type": "TEXT", "nullable": false},
+        {"name": "document_id", "type": "TEXT", "nullable": false},
+        {"name": "chunk_index", "type": "INTEGER", "nullable": false},
+        {"name": "content", "type": "TEXT", "nullable": false},
+        {"name": "token_count", "type": "INTEGER", "nullable": true}
+      ],
+      "foreign_keys": [
+        {"columns": ["document_id"], "references": {"table": "documents", "columns": ["id"]}}
+      ]
+    },
+    {
+      "name": "claims",
+      "kind": "table",
+      "scope": "shared",
+      "primary_key": ["id"],
+      "columns": [
+        {"name": "id", "type": "TEXT", "nullable": false},
+        {"name": "source_chunk_id", "type": "TEXT", "nullable": false},
+        {"name": "subject", "type": "TEXT", "nullable": false},
+        {"name": "predicate", "type": "TEXT", "nullable": false},
+        {"name": "object", "type": "TEXT", "nullable": false},
+        {"name": "confidence", "type": "REAL", "nullable": true},
+        {"name": "valid_from", "type": "TEXT", "nullable": true},
+        {"name": "valid_to", "type": "TEXT", "nullable": true},
+        {"name": "observed_at", "type": "TEXT", "nullable": false},
+        {"name": "topics", "type": "TEXT", "nullable": true}
+      ],
+      "foreign_keys": [
+        {"columns": ["source_chunk_id"], "references": {"table": "chunks", "columns": ["id"]}}
+      ]
+    },
+    {
+      "name": "entity_types",
+      "kind": "table",
+      "scope": "shared",
+      "primary_key": ["name"],
+      "columns": [
+        {"name": "name", "type": "TEXT", "nullable": false},
+        {"name": "description", "type": "TEXT", "nullable": true},
+        {"name": "attributes", "type": "TEXT", "nullable": true}
+      ]
+    },
+    {
+      "name": "edge_types",
+      "kind": "table",
+      "scope": "shared",
+      "primary_key": ["name"],
+      "columns": [
+        {"name": "name", "type": "TEXT", "nullable": false},
+        {"name": "description", "type": "TEXT", "nullable": true},
+        {"name": "source_type", "type": "TEXT", "nullable": true},
+        {"name": "target_type", "type": "TEXT", "nullable": true}
+      ]
+    },
+    {
+      "name": "entities",
+      "kind": "table",
+      "scope": "shared",
+      "primary_key": ["id"],
+      "columns": [
+        {"name": "id", "type": "TEXT", "nullable": false},
+        {"name": "type", "type": "TEXT", "nullable": false},
+        {"name": "name", "type": "TEXT", "nullable": false},
+        {"name": "attributes", "type": "TEXT", "nullable": true},
+        {"name": "merged_into", "type": "TEXT", "nullable": true}
+      ],
+      "foreign_keys": [
+        {"columns": ["type"], "references": {"table": "entity_types", "columns": ["name"]}},
+        {"columns": ["merged_into"], "references": {"table": "entities", "columns": ["id"]}}
+      ],
+      "notes": ["Active entities satisfy merged_into IS NULL."]
+    },
+    {
+      "name": "edges",
+      "kind": "table",
+      "scope": "shared",
+      "primary_key": ["id"],
+      "columns": [
+        {"name": "id", "type": "TEXT", "nullable": false},
+        {"name": "type", "type": "TEXT", "nullable": false},
+        {"name": "source_id", "type": "TEXT", "nullable": false},
+        {"name": "target_id", "type": "TEXT", "nullable": false},
+        {"name": "attributes", "type": "TEXT", "nullable": true},
+        {"name": "confidence", "type": "REAL", "nullable": true},
+        {"name": "valid_from", "type": "TEXT", "nullable": true},
+        {"name": "valid_to", "type": "TEXT", "nullable": true}
+      ],
+      "foreign_keys": [
+        {"columns": ["type"], "references": {"table": "edge_types", "columns": ["name"]}},
+        {"columns": ["source_id"], "references": {"table": "entities", "columns": ["id"]}},
+        {"columns": ["target_id"], "references": {"table": "entities", "columns": ["id"]}}
+      ]
+    },
+    {
+      "name": "entities_fts",
+      "kind": "virtual_table",
+      "scope": "shared",
+      "primary_key": [],
+      "columns": [
+        {"name": "name", "type": "TEXT", "nullable": true},
+        {"name": "attributes", "type": "TEXT", "nullable": true}
+      ],
+      "notes": ["FTS5 index over entities."]
+    },
+    {
+      "name": "entity_aliases",
+      "kind": "table",
+      "scope": "shared",
+      "primary_key": ["entity_id", "alias"],
+      "columns": [
+        {"name": "entity_id", "type": "TEXT", "nullable": false},
+        {"name": "alias", "type": "TEXT", "nullable": false},
+        {"name": "source", "type": "TEXT", "nullable": true}
+      ],
+      "foreign_keys": [
+        {"columns": ["entity_id"], "references": {"table": "entities", "columns": ["id"]}}
+      ]
+    },
+    {
+      "name": "entity_merges",
+      "kind": "table",
+      "scope": "shared",
+      "primary_key": ["id"],
+      "columns": [
+        {"name": "id", "type": "TEXT", "nullable": false},
+        {"name": "kept_entity_id", "type": "TEXT", "nullable": false},
+        {"name": "merged_entity_id", "type": "TEXT", "nullable": false},
+        {"name": "confidence", "type": "REAL", "nullable": false},
+        {"name": "merge_reason", "type": "TEXT", "nullable": false},
+        {"name": "merge_reason_detail", "type": "TEXT", "nullable": true},
+        {"name": "merged_at", "type": "TEXT", "nullable": true},
+        {"name": "reversed", "type": "INTEGER", "nullable": true}
+      ],
+      "foreign_keys": [
+        {"columns": ["kept_entity_id"], "references": {"table": "entities", "columns": ["id"]}},
+        {"columns": ["merged_entity_id"], "references": {"table": "entities", "columns": ["id"]}}
+      ]
+    },
+    {
+      "name": "run_manifest",
+      "kind": "table",
+      "scope": "run_root",
+      "primary_key": ["id"],
+      "columns": [
+        {"name": "id", "type": "TEXT", "nullable": false},
+        {"name": "started_at", "type": "TEXT", "nullable": false},
+        {"name": "finished_at", "type": "TEXT", "nullable": true},
+        {"name": "seed", "type": "INTEGER", "nullable": false},
+        {"name": "config_snapshot", "type": "TEXT", "nullable": false},
+        {"name": "hypothesis", "type": "TEXT", "nullable": true},
+        {"name": "docs_hash", "type": "TEXT", "nullable": true},
+        {"name": "graph_revision_id", "type": "TEXT", "nullable": false},
+        {"name": "total_rounds", "type": "INTEGER", "nullable": true},
+        {"name": "status", "type": "TEXT", "nullable": true},
+        {"name": "resumed_from", "type": "TEXT", "nullable": true},
+        {"name": "version", "type": "TEXT", "nullable": true}
+      ]
+    },
+    {
+      "name": "actors",
+      "kind": "table",
+      "scope": "run_scoped",
+      "primary_key": ["id"],
+      "columns": [
+        {"name": "id", "type": "TEXT", "nullable": false},
+        {"name": "run_id", "type": "TEXT", "nullable": false},
+        {"name": "entity_id", "type": "TEXT", "nullable": true},
+        {"name": "archetype", "type": "TEXT", "nullable": false},
+        {"name": "cognition_tier", "type": "TEXT", "nullable": false},
+        {"name": "name", "type": "TEXT", "nullable": false},
+        {"name": "handle", "type": "TEXT", "nullable": true},
+        {"name": "personality", "type": "TEXT", "nullable": false},
+        {"name": "bio", "type": "TEXT", "nullable": true},
+        {"name": "age", "type": "INTEGER", "nullable": true},
+        {"name": "gender", "type": "TEXT", "nullable": true},
+        {"name": "profession", "type": "TEXT", "nullable": true},
+        {"name": "region", "type": "TEXT", "nullable": true},
+        {"name": "language", "type": "TEXT", "nullable": true},
+        {"name": "stance", "type": "TEXT", "nullable": true},
+        {"name": "sentiment_bias", "type": "REAL", "nullable": true},
+        {"name": "activity_level", "type": "REAL", "nullable": true},
+        {"name": "influence_weight", "type": "REAL", "nullable": true},
+        {"name": "community_id", "type": "TEXT", "nullable": true},
+        {"name": "active_hours", "type": "TEXT", "nullable": true},
+        {"name": "follower_count", "type": "INTEGER", "nullable": true},
+        {"name": "following_count", "type": "INTEGER", "nullable": true}
+      ],
+      "foreign_keys": [
+        {"columns": ["run_id"], "references": {"table": "run_manifest", "columns": ["id"]}},
+        {"columns": ["entity_id"], "references": {"table": "entities", "columns": ["id"]}}
+      ]
+    },
+    {
+      "name": "actor_topics",
+      "kind": "table",
+      "scope": "run_scoped_via_actor",
+      "primary_key": ["actor_id", "topic"],
+      "columns": [
+        {"name": "actor_id", "type": "TEXT", "nullable": false},
+        {"name": "topic", "type": "TEXT", "nullable": false},
+        {"name": "weight", "type": "REAL", "nullable": true}
+      ],
+      "foreign_keys": [
+        {"columns": ["actor_id"], "references": {"table": "actors", "columns": ["id"]}}
+      ]
+    },
+    {
+      "name": "actor_beliefs",
+      "kind": "table",
+      "scope": "run_scoped_via_actor",
+      "primary_key": ["actor_id", "topic"],
+      "columns": [
+        {"name": "actor_id", "type": "TEXT", "nullable": false},
+        {"name": "topic", "type": "TEXT", "nullable": false},
+        {"name": "sentiment", "type": "REAL", "nullable": false},
+        {"name": "round_updated", "type": "INTEGER", "nullable": true}
+      ],
+      "foreign_keys": [
+        {"columns": ["actor_id"], "references": {"table": "actors", "columns": ["id"]}}
+      ]
+    },
+    {
+      "name": "post_topics",
+      "kind": "table",
+      "scope": "run_scoped_via_post",
+      "primary_key": ["post_id", "topic"],
+      "columns": [
+        {"name": "post_id", "type": "TEXT", "nullable": false},
+        {"name": "topic", "type": "TEXT", "nullable": false}
+      ],
+      "foreign_keys": [
+        {"columns": ["post_id"], "references": {"table": "posts", "columns": ["id"]}}
+      ]
+    },
+    {
+      "name": "entity_claims",
+      "kind": "table",
+      "scope": "shared",
+      "primary_key": ["entity_id", "claim_id"],
+      "columns": [
+        {"name": "entity_id", "type": "TEXT", "nullable": false},
+        {"name": "claim_id", "type": "TEXT", "nullable": false}
+      ],
+      "foreign_keys": [
+        {"columns": ["entity_id"], "references": {"table": "entities", "columns": ["id"]}},
+        {"columns": ["claim_id"], "references": {"table": "claims", "columns": ["id"]}}
+      ]
+    },
+    {
+      "name": "edge_claims",
+      "kind": "table",
+      "scope": "shared",
+      "primary_key": ["edge_id", "claim_id"],
+      "columns": [
+        {"name": "edge_id", "type": "TEXT", "nullable": false},
+        {"name": "claim_id", "type": "TEXT", "nullable": false}
+      ],
+      "foreign_keys": [
+        {"columns": ["edge_id"], "references": {"table": "edges", "columns": ["id"]}},
+        {"columns": ["claim_id"], "references": {"table": "claims", "columns": ["id"]}}
+      ]
+    },
+    {
+      "name": "communities",
+      "kind": "table",
+      "scope": "run_scoped",
+      "primary_key": ["id"],
+      "columns": [
+        {"name": "id", "type": "TEXT", "nullable": false},
+        {"name": "run_id", "type": "TEXT", "nullable": false},
+        {"name": "name", "type": "TEXT", "nullable": false},
+        {"name": "description", "type": "TEXT", "nullable": true},
+        {"name": "cohesion", "type": "REAL", "nullable": true}
+      ],
+      "foreign_keys": [
+        {"columns": ["run_id"], "references": {"table": "run_manifest", "columns": ["id"]}}
+      ]
+    },
+    {
+      "name": "community_overlap",
+      "kind": "table",
+      "scope": "run_scoped",
+      "primary_key": ["community_a", "community_b", "run_id"],
+      "columns": [
+        {"name": "community_a", "type": "TEXT", "nullable": false},
+        {"name": "community_b", "type": "TEXT", "nullable": false},
+        {"name": "run_id", "type": "TEXT", "nullable": false},
+        {"name": "weight", "type": "REAL", "nullable": false}
+      ],
+      "foreign_keys": [
+        {"columns": ["community_a"], "references": {"table": "communities", "columns": ["id"]}},
+        {"columns": ["community_b"], "references": {"table": "communities", "columns": ["id"]}},
+        {"columns": ["run_id"], "references": {"table": "run_manifest", "columns": ["id"]}}
+      ]
+    },
+    {
+      "name": "posts",
+      "kind": "table",
+      "scope": "run_scoped",
+      "primary_key": ["id"],
+      "columns": [
+        {"name": "id", "type": "TEXT", "nullable": false},
+        {"name": "run_id", "type": "TEXT", "nullable": false},
+        {"name": "author_id", "type": "TEXT", "nullable": false},
+        {"name": "content", "type": "TEXT", "nullable": false},
+        {"name": "reply_to", "type": "TEXT", "nullable": true},
+        {"name": "quote_of", "type": "TEXT", "nullable": true},
+        {"name": "round_num", "type": "INTEGER", "nullable": false},
+        {"name": "sim_timestamp", "type": "TEXT", "nullable": false},
+        {"name": "likes", "type": "INTEGER", "nullable": true},
+        {"name": "reposts", "type": "INTEGER", "nullable": true},
+        {"name": "comments", "type": "INTEGER", "nullable": true},
+        {"name": "reach", "type": "INTEGER", "nullable": true},
+        {"name": "sentiment", "type": "REAL", "nullable": true}
+      ],
+      "foreign_keys": [
+        {"columns": ["run_id"], "references": {"table": "run_manifest", "columns": ["id"]}},
+        {"columns": ["author_id"], "references": {"table": "actors", "columns": ["id"]}}
+      ]
+    },
+    {
+      "name": "follows",
+      "kind": "table",
+      "scope": "run_scoped",
+      "primary_key": ["follower_id", "following_id", "run_id"],
+      "columns": [
+        {"name": "follower_id", "type": "TEXT", "nullable": true},
+        {"name": "following_id", "type": "TEXT", "nullable": true},
+        {"name": "run_id", "type": "TEXT", "nullable": false},
+        {"name": "since_round", "type": "INTEGER", "nullable": true}
+      ],
+      "foreign_keys": [
+        {"columns": ["run_id"], "references": {"table": "run_manifest", "columns": ["id"]}}
+      ]
+    },
+    {
+      "name": "exposures",
+      "kind": "table",
+      "scope": "run_scoped",
+      "primary_key": ["actor_id", "post_id", "round_num"],
+      "columns": [
+        {"name": "actor_id", "type": "TEXT", "nullable": false},
+        {"name": "post_id", "type": "TEXT", "nullable": false},
+        {"name": "round_num", "type": "INTEGER", "nullable": false},
+        {"name": "run_id", "type": "TEXT", "nullable": false},
+        {"name": "reaction", "type": "TEXT", "nullable": true}
+      ],
+      "foreign_keys": [
+        {"columns": ["run_id"], "references": {"table": "run_manifest", "columns": ["id"]}}
+      ]
+    },
+    {
+      "name": "exposure_summary",
+      "kind": "view",
+      "scope": "derived",
+      "primary_key": [],
+      "columns": [
+        {"name": "actor_id", "type": "TEXT", "nullable": true},
+        {"name": "post_id", "type": "TEXT", "nullable": true},
+        {"name": "run_id", "type": "TEXT", "nullable": true},
+        {"name": "first_seen_round", "type": "INTEGER", "nullable": true},
+        {"name": "last_seen_round", "type": "INTEGER", "nullable": true},
+        {"name": "exposure_count", "type": "INTEGER", "nullable": true},
+        {"name": "strongest_reaction", "type": "TEXT", "nullable": true}
+      ],
+      "notes": ["Derived from exposures."]
+    },
+    {
+      "name": "narratives",
+      "kind": "table",
+      "scope": "run_scoped",
+      "primary_key": ["id"],
+      "columns": [
+        {"name": "id", "type": "TEXT", "nullable": false},
+        {"name": "run_id", "type": "TEXT", "nullable": false},
+        {"name": "topic", "type": "TEXT", "nullable": false},
+        {"name": "first_round", "type": "INTEGER", "nullable": true},
+        {"name": "peak_round", "type": "INTEGER", "nullable": true},
+        {"name": "current_intensity", "type": "REAL", "nullable": true},
+        {"name": "total_posts", "type": "INTEGER", "nullable": true},
+        {"name": "dominant_sentiment", "type": "REAL", "nullable": true}
+      ],
+      "foreign_keys": [
+        {"columns": ["run_id"], "references": {"table": "run_manifest", "columns": ["id"]}}
+      ]
+    },
+    {
+      "name": "telemetry",
+      "kind": "table",
+      "scope": "run_scoped",
+      "primary_key": ["id"],
+      "columns": [
+        {"name": "id", "type": "INTEGER", "nullable": false},
+        {"name": "run_id", "type": "TEXT", "nullable": false},
+        {"name": "round_num", "type": "INTEGER", "nullable": false},
+        {"name": "actor_id", "type": "TEXT", "nullable": true},
+        {"name": "cognition_tier", "type": "TEXT", "nullable": true},
+        {"name": "action_type", "type": "TEXT", "nullable": false},
+        {"name": "action_detail", "type": "TEXT", "nullable": true},
+        {"name": "tokens_input", "type": "INTEGER", "nullable": true},
+        {"name": "tokens_output", "type": "INTEGER", "nullable": true},
+        {"name": "cost_usd", "type": "REAL", "nullable": true},
+        {"name": "duration_ms", "type": "INTEGER", "nullable": true},
+        {"name": "provider", "type": "TEXT", "nullable": true},
+        {"name": "created_at", "type": "TEXT", "nullable": true}
+      ],
+      "foreign_keys": [
+        {"columns": ["run_id"], "references": {"table": "run_manifest", "columns": ["id"]}}
+      ]
+    },
+    {
+      "name": "rounds",
+      "kind": "table",
+      "scope": "run_scoped",
+      "primary_key": ["num", "run_id"],
+      "columns": [
+        {"name": "num", "type": "INTEGER", "nullable": false},
+        {"name": "run_id", "type": "TEXT", "nullable": false},
+        {"name": "sim_time", "type": "TEXT", "nullable": true},
+        {"name": "active_actors", "type": "INTEGER", "nullable": true},
+        {"name": "total_posts", "type": "INTEGER", "nullable": true},
+        {"name": "total_actions", "type": "INTEGER", "nullable": true},
+        {"name": "tier_a_calls", "type": "INTEGER", "nullable": true},
+        {"name": "tier_b_calls", "type": "INTEGER", "nullable": true},
+        {"name": "tier_c_actions", "type": "INTEGER", "nullable": true},
+        {"name": "avg_sentiment", "type": "REAL", "nullable": true},
+        {"name": "trending_topics", "type": "TEXT", "nullable": true},
+        {"name": "events", "type": "TEXT", "nullable": true},
+        {"name": "wall_time_ms", "type": "INTEGER", "nullable": true}
+      ],
+      "foreign_keys": [
+        {"columns": ["run_id"], "references": {"table": "run_manifest", "columns": ["id"]}}
+      ]
+    },
+    {
+      "name": "decision_cache",
+      "kind": "table",
+      "scope": "run_scoped",
+      "primary_key": ["id"],
+      "columns": [
+        {"name": "id", "type": "TEXT", "nullable": false},
+        {"name": "run_id", "type": "TEXT", "nullable": false},
+        {"name": "round_num", "type": "INTEGER", "nullable": false},
+        {"name": "actor_id", "type": "TEXT", "nullable": false},
+        {"name": "request_hash", "type": "TEXT", "nullable": false},
+        {"name": "raw_response", "type": "TEXT", "nullable": false},
+        {"name": "parsed_decision", "type": "TEXT", "nullable": false},
+        {"name": "model_id", "type": "TEXT", "nullable": false},
+        {"name": "prompt_version", "type": "TEXT", "nullable": false},
+        {"name": "tokens_input", "type": "INTEGER", "nullable": true},
+        {"name": "tokens_output", "type": "INTEGER", "nullable": true},
+        {"name": "duration_ms", "type": "INTEGER", "nullable": true}
+      ],
+      "foreign_keys": [
+        {"columns": ["run_id"], "references": {"table": "run_manifest", "columns": ["id"]}}
+      ]
+    },
+    {
+      "name": "snapshots",
+      "kind": "table",
+      "scope": "run_scoped",
+      "primary_key": ["id"],
+      "columns": [
+        {"name": "id", "type": "TEXT", "nullable": false},
+        {"name": "run_id", "type": "TEXT", "nullable": false},
+        {"name": "round_num", "type": "INTEGER", "nullable": false},
+        {"name": "created_at", "type": "TEXT", "nullable": true},
+        {"name": "actor_states", "type": "TEXT", "nullable": false},
+        {"name": "narrative_states", "type": "TEXT", "nullable": false},
+        {"name": "rng_state", "type": "TEXT", "nullable": false}
+      ],
+      "foreign_keys": [
+        {"columns": ["run_id"], "references": {"table": "run_manifest", "columns": ["id"]}}
+      ]
+    }
+  ],
+  "relationships": [
+    {"from": "documents", "to": "chunks", "cardinality": "1:N", "type": "containment", "via": ["chunks.document_id"]},
+    {"from": "chunks", "to": "claims", "cardinality": "1:N", "type": "provenance", "via": ["claims.source_chunk_id"]},
+    {"from": "entity_types", "to": "entities", "cardinality": "1:N", "type": "typing", "via": ["entities.type"]},
+    {"from": "edge_types", "to": "edges", "cardinality": "1:N", "type": "typing", "via": ["edges.type"]},
+    {"from": "entities", "to": "edges", "cardinality": "1:N", "type": "graph_source", "via": ["edges.source_id"]},
+    {"from": "entities", "to": "edges", "cardinality": "1:N", "type": "graph_target", "via": ["edges.target_id"]},
+    {"from": "entities", "to": "entity_aliases", "cardinality": "1:N", "type": "aliasing", "via": ["entity_aliases.entity_id"]},
+    {"from": "entities", "to": "entity_merges", "cardinality": "1:N", "type": "merge_kept", "via": ["entity_merges.kept_entity_id"]},
+    {"from": "entities", "to": "entity_merges", "cardinality": "1:N", "type": "merge_absorbed", "via": ["entity_merges.merged_entity_id"]},
+    {"from": "entities", "to": "entity_claims", "cardinality": "1:N", "type": "entity_provenance", "via": ["entity_claims.entity_id"]},
+    {"from": "claims", "to": "entity_claims", "cardinality": "1:N", "type": "entity_provenance", "via": ["entity_claims.claim_id"]},
+    {"from": "edges", "to": "edge_claims", "cardinality": "1:N", "type": "edge_provenance", "via": ["edge_claims.edge_id"]},
+    {"from": "claims", "to": "edge_claims", "cardinality": "1:N", "type": "edge_provenance", "via": ["edge_claims.claim_id"]},
+    {"from": "run_manifest", "to": "actors", "cardinality": "1:N", "type": "run_scope", "via": ["actors.run_id"]},
+    {"from": "run_manifest", "to": "communities", "cardinality": "1:N", "type": "run_scope", "via": ["communities.run_id"]},
+    {"from": "run_manifest", "to": "community_overlap", "cardinality": "1:N", "type": "run_scope", "via": ["community_overlap.run_id"]},
+    {"from": "run_manifest", "to": "posts", "cardinality": "1:N", "type": "run_scope", "via": ["posts.run_id"]},
+    {"from": "run_manifest", "to": "follows", "cardinality": "1:N", "type": "run_scope", "via": ["follows.run_id"]},
+    {"from": "run_manifest", "to": "exposures", "cardinality": "1:N", "type": "run_scope", "via": ["exposures.run_id"]},
+    {"from": "run_manifest", "to": "narratives", "cardinality": "1:N", "type": "run_scope", "via": ["narratives.run_id"]},
+    {"from": "run_manifest", "to": "telemetry", "cardinality": "1:N", "type": "run_scope", "via": ["telemetry.run_id"]},
+    {"from": "run_manifest", "to": "rounds", "cardinality": "1:N", "type": "run_scope", "via": ["rounds.run_id"]},
+    {"from": "run_manifest", "to": "decision_cache", "cardinality": "1:N", "type": "run_scope", "via": ["decision_cache.run_id"]},
+    {"from": "run_manifest", "to": "snapshots", "cardinality": "1:N", "type": "run_scope", "via": ["snapshots.run_id"]},
+    {"from": "entities", "to": "actors", "cardinality": "1:N", "type": "entity_to_actor", "via": ["actors.entity_id"]},
+    {"from": "actors", "to": "actor_topics", "cardinality": "1:N", "type": "profile_topics", "via": ["actor_topics.actor_id"]},
+    {"from": "actors", "to": "actor_beliefs", "cardinality": "1:N", "type": "belief_state", "via": ["actor_beliefs.actor_id"]},
+    {"from": "communities", "to": "actors", "cardinality": "1:N", "type": "membership", "via": ["actors.community_id"]},
+    {"from": "communities", "to": "community_overlap", "cardinality": "1:N", "type": "overlap_a", "via": ["community_overlap.community_a"]},
+    {"from": "communities", "to": "community_overlap", "cardinality": "1:N", "type": "overlap_b", "via": ["community_overlap.community_b"]},
+    {"from": "actors", "to": "posts", "cardinality": "1:N", "type": "authorship", "via": ["posts.author_id"]},
+    {"from": "posts", "to": "post_topics", "cardinality": "1:N", "type": "post_topic", "via": ["post_topics.post_id"]},
+    {"from": "actors", "to": "follows", "cardinality": "1:N", "type": "follower", "via": ["follows.follower_id"]},
+    {"from": "actors", "to": "follows", "cardinality": "1:N", "type": "following", "via": ["follows.following_id"]},
+    {"from": "actors", "to": "exposures", "cardinality": "1:N", "type": "viewer", "via": ["exposures.actor_id"]},
+    {"from": "posts", "to": "exposures", "cardinality": "1:N", "type": "exposed_post", "via": ["exposures.post_id"]},
+    {"from": "actors", "to": "telemetry", "cardinality": "1:N", "type": "actor_events", "via": ["telemetry.actor_id"]},
+    {"from": "actors", "to": "decision_cache", "cardinality": "1:N", "type": "actor_decisions", "via": ["decision_cache.actor_id"]}
+  ],
+  "runtime_projections": [
+    {
+      "name": "PlatformState",
+      "kind": "read_model",
+      "backed_by": ["posts", "post_topics", "actors", "communities", "community_overlap", "follows"],
+      "notes": ["Used by feed.ts, propagation.ts, events.ts, engine.ts."]
+    },
+    {
+      "name": "ActorContext",
+      "kind": "read_model",
+      "backed_by": ["actors", "actor_topics", "actor_beliefs", "posts", "exposures"],
+      "notes": ["Used by cognition.ts to build DecisionRequest context."]
+    },
+    {
+      "name": "NarrativeState",
+      "kind": "in_memory_projection",
+      "backed_by": ["narratives"]
+    },
+    {
+      "name": "RoundContext",
+      "kind": "runtime_object",
+      "backed_by": ["rounds", "snapshots"],
+      "notes": ["Constructed by engine, not persisted as a single table row."]
+    }
+  ]
+}

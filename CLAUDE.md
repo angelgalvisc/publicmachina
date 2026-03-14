@@ -203,7 +203,13 @@ Each step feeds the next. Strict order.
 - [x] maxActors option respected
 - [x] Empty entities → graceful empty result
 
-**EXIT GATE:** ✅ All 4 files with green tests (128/128). Ingestion pipeline complete: documents → chunks → entity_types → edge_types → claims → entities → edges → entity_resolution → actors → communities → follows → seed_posts.
+**EXIT GATE:** ✅ All 4 files with green tests (140/140). Ingestion pipeline complete: documents → chunks → entity_types → edge_types → claims → entities → edges → entity_resolution → actors → communities → follows → seed_posts.
+
+**Post-audit fixes applied:**
+- profiles.ts: replaced `randomUUID()` with `stableId()` (SHA-256 derived) for actors, communities, and seed posts. Added stable sort tiebreaker in `detectCommunities()`.
+- db.ts: `getAllActiveEntities()` now uses `ORDER BY id` for deterministic entity ordering.
+- ontology.ts: claim extraction changed from batch to per-chunk for exact `source_chunk_id` provenance. Removed `findBestSourceChunk()` heuristic.
+- Added reproducibility tests verifying same inputs + same `runId` → same structural outputs across pipeline runs.
 
 ---
 

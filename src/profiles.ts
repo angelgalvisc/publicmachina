@@ -22,9 +22,9 @@ import type {
   Follow,
   Post,
 } from "./db.js";
+import { stableId } from "./db.js";
 import type { LLMClient } from "./llm.js";
 import type { SimConfig } from "./config.js";
-import { randomUUID } from "node:crypto";
 
 // ═══════════════════════════════════════════════════════
 // TYPES
@@ -264,9 +264,9 @@ export async function generateProfiles(
     // Determine active hours (peak hours from config or default)
     const peakHours = config?.simulation?.peakHours ?? [8, 9, 10, 12, 13, 19, 20, 21, 22];
 
-    // Create actor in DB
+    // Create actor in DB with stable ID derived from runId + entity.id
     const actorId = store.addActor({
-      id: "",
+      id: stableId(runId, "actor", entity.id),
       run_id: runId,
       entity_id: entity.id,
       archetype,
@@ -379,7 +379,7 @@ export async function generateProfiles(
       const topics = actorTopicsMap.get(actorId) ?? [];
       const topTopic = topics.length > 0 ? topics[0].topic : "general";
 
-      const postId = randomUUID();
+      const postId = stableId(runId, "seed-post", actorId, String(p));
       store.addPost({
         id: postId,
         run_id: runId,
@@ -465,11 +465,12 @@ function detectCommunities(
   const communityTopics = new Map<string, Set<string>>();
   const assigned = new Set<string>();
 
-  // Sort actors by number of topics (most topical first)
+  // Sort actors by number of topics (most topical first), with stable tiebreaker by ID
   const sorted = [...actorIds].sort((a, b) => {
     const aTopics = topicsMap.get(a)?.length ?? 0;
     const bTopics = topicsMap.get(b)?.length ?? 0;
-    return bTopics - aTopics;
+    if (bTopics !== aTopics) return bTopics - aTopics;
+    return a.localeCompare(b); // stable tiebreaker
   });
 
   for (const actorId of sorted) {
@@ -499,7 +500,9 @@ function detectCommunities(
         communityTopics.get(bestCommunity)!.add(t);
       }
     } else {
-      const newId = randomUUID();
+      // Derive community ID from the founding actor's topics (sorted for stability)
+      const sortedTopics = [...actorTopics].sort().join(",");
+      const newId = stableId("community", actorId, sortedTopics);
       communities.set(newId, [actorId]);
       communityTopics.set(newId, new Set(actorTopics));
     }
