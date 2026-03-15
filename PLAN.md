@@ -1,10 +1,10 @@
-# SeldonClaw — Social Simulation Engine on CKP + NullClaw
+# SeldonClaw — Social Simulation Engine on CKP + DirectLLM
 
 ## Context
 
 MiroFish (github.com/666ghj/MiroFish) is a pioneering social simulation engine with a well-designed pipeline (ontology → graph → profiles → simulation → report). However, it has limitations that hinder adoption in resource-constrained or audit-sensitive environments: dependency on Zep Cloud, OASIS as a black box for the social engine, no agent portability, hardcoded timezone, and fragmented storage.
 
-**SeldonClaw** builds on the same pipeline concept but with different design choices: TypeScript-first, SQLite-first, NullClawBackend by default (swappable), CKP as the actor portability contract (not as the social engine), explicit and auditable social engine, and flat structure (~20 files).
+**SeldonClaw** builds on the same pipeline concept but with different design choices: TypeScript-first, SQLite-first, DirectLLMBackend by default (swappable), CKP as the actor portability contract (not as the social engine), explicit and auditable social engine, and flat structure (~20 files).
 
 ## Design Decisions
 
@@ -12,7 +12,7 @@ MiroFish (github.com/666ghj/MiroFish) is a pioneering social simulation engine w
 |---|---|---|
 | Language | **TypeScript** | Native CKP SDK, fast iteration, auditable |
 | Storage | **1 SQLite file** behind `GraphStore` interface | Zero cloud, Pi 4 viable, FTS5 (no embeddings in v1). Interface allows swapping storage |
-| NullClaw | **Default backend**, not the central piece | HTTP gateway loopback. Swappable with any CKP conformant runtime |
+| Cognition backend | **DirectLLMBackend** (default), not tied to any external runtime | Calls llm.ts directly. Swappable with NullClawBackend or any CKP conformant runtime |
 | Actors | **ActorSpec + ActorState** separated | Spec = portable contract (CKP). State = beliefs/stance/fatigue (simulation) |
 | Cognition | **3 layers**: CognitionRouter + DecisionPolicy + CognitionBackend | Router decides tier. Policy decides rules. Backend executes. Clean separation |
 | Social engine | **Explicit standalone module** | activation, feed, propagation, fatigue, events — not CKP Swarm |
@@ -78,21 +78,15 @@ MiroFish (github.com/666ghj/MiroFish) is a pioneering social simulation engine w
 │  └──────────────────────────────────────┘             │
 │                                                      │
 │  CognitionBackend (interface)                         │
-│  ├── NullClawBackend (default, HTTP gateway)         │
+│  ├── DirectLLMBackend (default, calls llm.ts)        │
 │  ├── RecordedBackend (replay from decision_cache)    │
-│  └── MockBackend (tests)                             │
-└──────────────┬───────────────────────────────────────┘
-               │ HTTP loopback: POST /a2a or adapter
-┌──────────────▼───────────────────────────────────────┐
-│         NullClaw Gateway (1 process, 678KB)          │
-│  Default cognitive backend (swappable)               │
-│  Real API: /health, /pair, /webhook, /a2a            │
-│  Input: actor_context + feed + actions (via A2A)     │
-│  Output: {action, content, targets}                  │
+│  ├── MockBackend (tests)                             │
+│  └── NullClawBackend (optional, HTTP gateway)        │
 └──────────────────────────────────────────────────────┘
 ```
 
-**2 processes total. Pi 4 viable (footprint pending benchmark).**
+**1 process total. Pi 4 viable (footprint pending benchmark).**
+NullClaw Gateway is optional — only needed if `NullClawBackend` is configured instead of `DirectLLMBackend`.
 
 ## Project Structure
 
@@ -115,7 +109,7 @@ seldonclaw/
 │   ├── fatigue.ts            # Narrative decay + re-activation
 │   ├── events.ts             # Event scheduling + threshold triggers
 │   ├── cognition.ts          # CognitionRouter + DecisionPolicy + CognitionBackend interface
-│   ├── nullclaw-worker.ts    # NullClawBackend (HTTP gateway, default)
+│   ├── nullclaw-worker.ts    # NullClawBackend (HTTP gateway, optional)
 │   ├── ckp.ts                # CKP manifest I/O, export-agent/import-agent bundle + scrubSecrets()
 │   ├── telemetry.ts          # Structured event logging to SQLite + sanitizeDetail()
 │   ├── reproducibility.ts    # seed, decision_cache, RecordedBackend, snapshots, run_manifest
@@ -1049,23 +1043,24 @@ interface CognitionBackend {
 }
 
 // Implementations:
-//   NullClawBackend  — HTTP gateway loopback (default)
+//   DirectLLMBackend — calls llm.ts directly (default)
 //   RecordedBackend  — replay from decision_cache
 //   MockBackend      — tests without LLM
+//   NullClawBackend  — HTTP gateway loopback (optional)
 //   RemoteCKPBackend — v2: any CKP conformant runtime
 ```
 
-**Rule:** engine.ts never imports NullClaw directly. It only knows `CognitionBackend`.
+**Rule:** engine.ts never imports DirectLLMBackend or NullClaw directly. It only knows `CognitionBackend`.
 
 **Cost impact:**
 With 100 actors, 72 rounds, ~20 active/round:
 - Without tiers: 20 × 72 = 1,440 LLM calls
 - With tiers (5A + 10B@30% + 5C): (5 + 3 + 0) × 72 = 576 LLM calls → **60% savings**
 
-## NullClawBackend (nullclaw-worker.ts)
+## NullClawBackend (nullclaw-worker.ts) — Optional
 
-Concrete implementation of `CognitionBackend`.
-**Default: HTTP gateway loopback.** Uses ONLY documented NullClaw endpoints.
+Concrete implementation of `CognitionBackend` via NullClaw HTTP gateway.
+**Optional alternative to DirectLLMBackend.** Uses ONLY documented NullClaw endpoints.
 
 **Documented NullClaw Gateway API:**
 - `GET /health` — health check
@@ -1487,10 +1482,10 @@ simulation:
 
 cognition:
   tierA:
-    minInfluence: 0.8            # influence_weight >= this → always NullClaw
+    minInfluence: 0.8            # influence_weight >= this → always LLM (tier A)
     archetypeOverrides: ["institution", "media"]  # always tier A
   tierB:
-    samplingRate: 0.3            # probability of NullClaw without explicit salience
+    samplingRate: 0.3            # probability of LLM call without explicit salience
   tierC:
     repostProb: 0.4              # P(repost) given viral post in feed
     likeProb: 0.6                # P(like) given aligned post
@@ -1691,7 +1686,7 @@ with the CLI/shell phase, not before Phase 2. The core pipeline comes first.
 
 | Dimension | MiroFish | SeldonClaw |
 |---|---|---|
-| **Processes** | Flask + OASIS subprocess + Zep Cloud | **2 processes** (Node + NullClaw) |
+| **Processes** | Flask + OASIS subprocess + Zep Cloud | **1 process** (Node, DirectLLMBackend built-in) |
 | **RAM** | >1GB | **Pi 4 viable** (footprint pending benchmark) |
 | **Storage** | Zep Cloud + OASIS SQLite + JSONL | **1 SQLite file** |
 | **Actors** | Ephemeral Python objects | **SQLite rows** + CKP archetypes |

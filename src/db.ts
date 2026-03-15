@@ -453,6 +453,7 @@ CREATE TABLE IF NOT EXISTS edges (
   confidence REAL DEFAULT 1.0,
   valid_from TEXT,
   valid_to TEXT,
+  FOREIGN KEY (type) REFERENCES edge_types(name),
   FOREIGN KEY (source_id) REFERENCES entities(id),
   FOREIGN KEY (target_id) REFERENCES entities(id)
 );
