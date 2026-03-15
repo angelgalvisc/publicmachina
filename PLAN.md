@@ -11,7 +11,7 @@ MiroFish (github.com/666ghj/MiroFish) is a pioneering social simulation engine w
 | Decision | Choice | Rationale |
 |---|---|---|
 | Language | **TypeScript** | Native CKP SDK, fast iteration, auditable |
-| Storage | **1 SQLite file** behind `GraphStore` interface | Zero cloud, Pi 4 viable, FTS5 (no embeddings in v1). Interface allows swapping storage |
+| Storage | **1 SQLite file** behind `GraphStore` interface | Zero cloud, Pi 4 viable, FTS5 + optional embedding cache. Interface allows swapping storage |
 | Cognition backend | **DirectLLMBackend** (default), not tied to any external runtime | Calls llm.ts directly. Swappable with NullClawBackend or any CKP conformant runtime |
 | Actors | **ActorSpec + ActorState** separated | Spec = portable contract (CKP). State = beliefs/stance/fatigue (simulation) |
 | Cognition | **3 layers**: CognitionRouter + DecisionPolicy + CognitionBackend | Router decides tier. Policy decides rules. Backend executes. Clean separation |
@@ -1244,9 +1244,14 @@ interface DecisionResponse {
 }
 ```
 
-### Interaction Summary (actor memory without a separate table)
+### Interaction Summary (hybrid actor memory)
 
-Actors need temporal memory — "I argued with @rector-01 last round", "My post about tuition got 40 likes". Instead of a `simulation_memories` table, this is **derived on-the-fly** from existing normalized tables when building `DecisionRequest.simContext`:
+Actors need temporal memory — "I argued with @rector-01 last round", "My post about tuition got 40 likes". SeldonClaw now uses a **hybrid memory model**:
+
+- **derived interaction memory** from normalized tables (`posts`, `exposures`, `telemetry`, `follows`)
+- **persisted deliberative memory** in `actor_memories` for Tier A/B actors (reflections, salient interactions, event memories, narrative memories)
+
+The interaction summary still gets built at request time, but it now blends live interaction history with persisted memories:
 
 ```typescript
 // In cognition.ts — builds simContext for Tier A/B DecisionRequests
@@ -1718,7 +1723,7 @@ with the CLI/shell phase, not before Phase 2. The core pipeline comes first.
 | **Data** | Opaque JSON blobs | **Normalized**: actor_topics, actor_beliefs, post_topics, entity_claims, community_overlap |
 | **Engagement** | Post/comment only | **6 actions**: post, comment, like, repost, follow, search |
 | **Platform** | Twitter + Reddit (superficial) | **X only** — one platform modeled deeply, not two modeled shallowly |
-| **Actor memory** | Separate memory table | **Derived on-the-fly** from posts + exposures + beliefs (no sync problem) |
+| **Actor memory** | Separate memory table | **Hybrid**: interaction history derived on-the-fly + persisted `actor_memories` for deliberative continuity |
 | **Actor traits** | gender, country, language in separate table | **Inline** on actors table: gender, region, language (no join overhead) |
 | **LLM SDK** | OpenAI compat (loses strict/response_format/seed) | **Anthropic native** for structured extraction |
 | **Auditable** | Python monolith | **~20 TS files**, flat src/, run_id on every mutable table |
@@ -1934,6 +1939,122 @@ seldonclaw> export journalist-01
 ### Priority
 
 P2 — requires `report.ts`, `interview.ts`, and the core engine to be working first. The shell composes existing capabilities; it doesn't introduce new data paths.
+
+## V3 / V4 Extensions — Implemented
+
+Two post-MVP extensions were added after the core engine stabilized. They were implemented in dependency order so each layer could reuse the previous one without widening the architecture:
+
+### V3 — Agent Memory
+
+**Goal:** increase actor continuity across rounds and improve interview coherence.
+
+**Tasks**
+1. Add `actor_memories` table + indices in SQLite.
+2. Add `ActorMemoryRow` types and `GraphStore` methods.
+3. Add `memory.ts` to derive short, auditable memories from:
+   - reflections (`decision.reasoning`)
+   - salient feed interactions
+   - active events
+   - dominant narratives
+4. Persist memories for Tier A/B actors in the round transaction.
+5. Extend `buildSimContext()` and interview context with top memories.
+
+**Dependency chain**
+- schema/types/store first
+- then `memory.ts`
+- then `engine.ts`
+- then `cognition.ts` / `interview.ts`
+
+**Why this order:** memory becomes another read model on top of the current engine instead of a second cognition system.
+
+### V4 — Embedding-aware Feed
+
+**Goal:** augment heuristic feed ranking with semantic relevance while keeping the original ranking path as fallback.
+
+**Tasks**
+1. Add `post_embeddings` and `actor_interest_embeddings` tables.
+2. Add store cache methods for both embedding types.
+3. Introduce `embeddings.ts`:
+   - `EmbeddingProvider` interface
+   - deterministic hash-based provider for local/offline use
+   - cache population helpers
+4. Enrich `PlatformState` with optional embedding maps.
+5. Update `feed.ts` to add semantic similarity when `feed.embeddingEnabled = true`.
+6. Keep heuristics (`recency`, `popularity`, `relevance`, `community affinity`) as the default/base score.
+
+**Dependency chain**
+- schema/types/store first
+- then provider/cache layer
+- then `engine.ts` state enrichment
+- then `feed.ts` scoring
+
+**Why this order:** feed ranking stays pure and deterministic; embeddings are attached to state before scheduling instead of making `feed.ts` query storage directly.
+
+### Runtime contract
+
+- `embeddingEnabled = false` preserves the original feed behavior.
+- Memory is additive: if no memories exist, `buildSimContext()` still works from interaction history only.
+- Reproducibility remains auditable because:
+  - memory rows are persisted with `run_id`, `actor_id`, and `round_num`
+  - embedding cache rows store `model_id` + content/profile hash
+  - no silent recomputation is required during replay
+
+### Code touchpoints
+
+- `src/memory.ts`
+- `src/embeddings.ts`
+- `src/feed.ts`
+- `src/cognition.ts`
+- `src/interview.ts`
+- `src/engine.ts`
+- `src/schema.ts`
+- `src/store.ts`
+- `src/types.ts`
+
+## V5 Extension — Web-grounded Search
+
+**Goal:** let Tier A/B actors enrich decisions with auditable real-world context without breaking replayability.
+
+**Tasks**
+1. Add `search` config with endpoint, cutoff, tiers, result limits, and timeout.
+2. Add `search_cache` for cache-first reuse and `search_requests` for per-actor per-round audit.
+3. Introduce `search.ts`:
+   - `SearchProvider` interface
+   - SearXNG HTTP client
+   - temporal cutoff filtering
+   - cache-first lookup
+   - prompt context formatting
+4. Extend `DecisionRequest` with optional `webContext`.
+5. Derive search queries deterministically during scheduler staging.
+6. Resolve web searches only for enabled Tier A/B jobs during concurrent execution.
+7. Persist `search_requests` in the round transaction.
+8. Extend `doctor` to validate the SearXNG endpoint when search is enabled.
+
+**Dependency chain**
+- config/schema/types/store first
+- then `search.ts`
+- then `cognition.ts`
+- then `scheduler.ts`
+- then `engine.ts` / `index.ts`
+
+**Why this order:** query generation remains deterministic and auditable, while the HTTP fetch work stays outside the sequential staging loop.
+
+**Runtime contract**
+- `search.enabled = false` preserves the original behavior.
+- `search_cache` stores reusable result sets by `(query, cutoff_date, language, categories)`.
+- `search_requests` records which actor searched what in each round.
+- `DecisionRequest.webContext` is part of the replay hash.
+- Search failures degrade gracefully to feed-only cognition; they do not abort a round.
+
+**Code touchpoints**
+- `src/search.ts`
+- `src/config.ts`
+- `src/schema.ts`
+- `src/store.ts`
+- `src/cognition.ts`
+- `src/scheduler.ts`
+- `src/engine.ts`
+- `src/index.ts`
 
 ## Verification
 

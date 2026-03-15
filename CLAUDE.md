@@ -504,5 +504,5 @@ These are the non-negotiable contracts. If implementation deviates, update PLAN.
 | Security | PLAN.md lines 29, DEPLOYMENT.md | Secrets never in persistent data. sanitize/redact/scrub |
 | Pairing default | PLAN.md line 1518 | `enabled: true` — secure by default |
 | Platform | PLAN.md lines 1210, 1228, 1457 | `"x"` only (X, formerly Twitter). No Reddit in v1 |
-| Actor memory | PLAN.md lines 1240-1278 | Derived on-the-fly via `buildSimContext()`, no `simulation_memories` table |
+| Actor memory | PLAN.md lines 1247-1278, 1948-2007 | Hybrid model: derived interaction context + persisted `actor_memories` for deliberative continuity |
 | prompt_version NOT NULL | PLAN.md line 533 | Required in decision_cache, used in replay lookup |
