@@ -5,24 +5,29 @@
  * Source of truth: PLAN.md §CLI, CLAUDE.md Phase 5.2
  *
  * Commander-based CLI with subcommands:
- *   simulate — run simulation rounds
- *   stats    — show run metrics
- *   (stubs for future phases: run, ingest, analyze, generate, etc.)
+ *   run/ingest/analyze/generate/simulate — pipeline + simulation entry points
+ *   stats/report/interview/export/import/shell — analysis and operator tools
+ *   resume/replay — planned follow-ups (still stubbed)
  */
 
 import { Command } from "commander";
 import { pathToFileURL } from "node:url";
 import { SQLiteGraphStore, uuid } from "./db.js";
-import { loadConfig, defaultConfig } from "./config.js";
+import { loadConfig, defaultConfig, sanitizeForStorage } from "./config.js";
 import type { SimConfig } from "./config.js";
 import { DirectLLMBackend, MockCognitionBackend, getPromptVersion } from "./cognition.js";
 import { runSimulation } from "./engine.js";
 import { getTierStats } from "./telemetry.js";
 import { LLMClient, MockLLMClient } from "./llm.js";
-import { interviewActor, resolveActorByName } from "./interview.js";
+import { interviewActor, resolveActorByName, formatActorContext } from "./interview.js";
 import { exportAgent, importAgent } from "./ckp.js";
 import { generateReport } from "./report.js";
 import { startShell } from "./shell.js";
+import { ingestDirectory } from "./ingest.js";
+import { extractOntology } from "./ontology.js";
+import { buildKnowledgeGraph } from "./graph.js";
+import { generateProfiles } from "./profiles.js";
+import type { RunManifest } from "./db.js";
 import { existsSync, writeFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 
@@ -67,6 +72,97 @@ function createCliLlm(config: SimConfig, options: { mock?: boolean; feature?: "r
     return llm;
   }
   return new LLMClient(config.providers);
+}
+
+function createPipelineMockLlm(): MockLLMClient {
+  const llm = new MockLLMClient();
+  llm.setResponse(
+    "Analyze the following document chunks and extract the ontology schema.",
+    JSON.stringify({
+      entity_types: [
+        { name: "person", description: "Individual actor", attributes: ["name", "role"] },
+        { name: "organization", description: "Institution or organization", attributes: ["name"] },
+      ],
+      edge_types: [
+        {
+          name: "opposes",
+          description: "Publicly opposes",
+          source_type: "person",
+          target_type: "organization",
+        },
+      ],
+    })
+  );
+  llm.setResponse(
+    "Extract all factual claims from the following text chunks.",
+    JSON.stringify({
+      claims: [
+        {
+          subject: "Elena Ruiz",
+          predicate: "opposes",
+          object: "Universidad Central",
+          confidence: 0.9,
+          valid_from: null,
+          valid_to: null,
+          topics: ["education", "protest"],
+        },
+      ],
+    })
+  );
+  llm.setResponse(
+    "Generate a social media profile for the following entity",
+    JSON.stringify({
+      personality: "A civically engaged account that comments on public issues with concise, evidence-oriented posts.",
+      bio: "Public affairs observer",
+      age: 32,
+      gender: null,
+      profession: "journalist",
+      region: "Bogota",
+      language: "es",
+      stance: "opposing",
+      sentiment_bias: -0.3,
+      activity_level: 0.7,
+      influence_weight: 0.6,
+      handle: "@sim_actor",
+      topics: [{ topic: "education", weight: 0.9 }],
+      beliefs: [{ topic: "education", sentiment: -0.4 }],
+    })
+  );
+  return llm;
+}
+
+function createPipelineLlm(config: SimConfig, mock?: boolean): LLMClient {
+  return mock ? createPipelineMockLlm() : new LLMClient(config.providers);
+}
+
+function ensureRunManifest(
+  store: SQLiteGraphStore,
+  runId: string,
+  config: SimConfig,
+  hypothesis?: string
+): void {
+  const existing = store.getRun(runId);
+  const graphRevisionId = store.computeGraphRevisionId();
+  const payload: RunManifest = {
+    id: runId,
+    started_at: existing?.started_at ?? new Date().toISOString(),
+    seed: config.simulation.seed,
+    config_snapshot: sanitizeForStorage(config),
+    graph_revision_id: graphRevisionId,
+    hypothesis: hypothesis ?? existing?.hypothesis,
+    total_rounds: existing?.total_rounds,
+    status: existing?.status ?? "paused",
+    finished_at: existing?.finished_at,
+    resumed_from: existing?.resumed_from,
+    version: existing?.version,
+    docs_hash: existing?.docs_hash,
+  };
+
+  if (existing) {
+    store.updateRun(runId, payload);
+  } else {
+    store.createRun(payload);
+  }
 }
 
 function createPromptSession(): PromptSession {
@@ -301,6 +397,175 @@ function runStatsCommand(
   }
 }
 
+async function runIngestCommand(
+  opts: { db: string; docs: string },
+  io: CliIO
+): Promise<void> {
+  const store = new SQLiteGraphStore(opts.db);
+  try {
+    const result = await ingestDirectory(store, opts.docs);
+    io.stdout(`Ingested documents from ${opts.docs}\n`);
+    io.stdout(`  New documents: ${result.newDocuments}\n`);
+    io.stdout(`  Total chunks: ${result.totalChunks}\n`);
+    io.stdout(`  Deduplicated: ${result.skippedDocuments}\n`);
+    if (result.errors.length > 0) {
+      io.stdout(`  Errors: ${result.errors.length}\n`);
+    }
+  } finally {
+    store.close();
+  }
+}
+
+async function runAnalyzeCommand(
+  opts: { db: string; config?: string; mock?: boolean },
+  io: CliIO
+): Promise<void> {
+  const config = getConfig(opts.config);
+  const llm = createPipelineLlm(config, opts.mock);
+  const store = new SQLiteGraphStore(opts.db);
+  try {
+    const ontology = await extractOntology(store, llm);
+    const graph = await buildKnowledgeGraph(store, llm);
+    io.stdout("Analysis complete\n");
+    io.stdout(`  Entity types: ${ontology.entityTypes.length}\n`);
+    io.stdout(`  Edge types: ${ontology.edgeTypes.length}\n`);
+    io.stdout(`  Claims: ${ontology.claimsExtracted}\n`);
+    io.stdout(`  Entities: ${graph.entitiesCreated}\n`);
+    io.stdout(`  Edges: ${graph.edgesCreated}\n`);
+    io.stdout(`  Graph revision: ${graph.graphRevisionId}\n`);
+  } finally {
+    store.close();
+  }
+}
+
+async function runGenerateCommand(
+  opts: {
+    db: string;
+    run?: string;
+    config?: string;
+    hypothesis?: string;
+    mock?: boolean;
+    maxActors?: string;
+  },
+  io: CliIO
+): Promise<void> {
+  const config = getConfig(opts.config);
+  const llm = createPipelineLlm(config, opts.mock);
+  const store = new SQLiteGraphStore(opts.db);
+  const runId = opts.run ?? uuid();
+  try {
+    ensureRunManifest(store, runId, config, opts.hypothesis);
+    const result = await generateProfiles(
+      store,
+      llm,
+      {
+        runId,
+        hypothesis: opts.hypothesis,
+        maxActors: opts.maxActors ? parseIntOption(opts.maxActors, "maxActors") : 0,
+        platform: config.simulation.platform,
+      },
+      config
+    );
+    io.stdout(`Generated profiles for run ${runId}\n`);
+    io.stdout(`  Actors: ${result.actorsCreated}\n`);
+    io.stdout(`  Communities: ${result.communitiesCreated}\n`);
+    io.stdout(`  Follows: ${result.followsCreated}\n`);
+    io.stdout(`  Seed posts: ${result.seedPostsCreated}\n`);
+  } finally {
+    store.close();
+  }
+}
+
+async function runPipelineCommand(
+  opts: {
+    db: string;
+    docs: string;
+    hypothesis?: string;
+    rounds?: string;
+    seed?: string;
+    config?: string;
+    run?: string;
+    mock?: boolean;
+  },
+  io: CliIO
+): Promise<void> {
+  const config = getConfig(opts.config);
+  if (opts.rounds) {
+    const rounds = parseIntOption(opts.rounds, "rounds");
+    config.simulation.totalHours = (rounds * config.simulation.minutesPerRound) / 60;
+  }
+  if (opts.seed !== undefined) {
+    config.simulation.seed = parseIntOption(opts.seed, "seed");
+  }
+
+  const store = new SQLiteGraphStore(opts.db);
+  const runId = opts.run ?? uuid();
+  const llm = createPipelineLlm(config, opts.mock);
+
+  try {
+    const ingest = await ingestDirectory(store, opts.docs);
+    io.stdout(`Ingested ${ingest.newDocuments} documents (${ingest.totalChunks} chunks)\n`);
+
+    const ontology = await extractOntology(store, llm);
+    const graph = await buildKnowledgeGraph(store, llm);
+    io.stdout(`Analyzed corpus: ${ontology.claimsExtracted} claims, ${graph.entitiesCreated} entities\n`);
+
+    ensureRunManifest(store, runId, config, opts.hypothesis);
+    const profiles = await generateProfiles(
+      store,
+      llm,
+      {
+        runId,
+        hypothesis: opts.hypothesis,
+        platform: config.simulation.platform,
+      },
+      config
+    );
+    io.stdout(`Generated ${profiles.actorsCreated} actors for run ${runId}\n`);
+
+    const backend = opts.mock
+      ? new MockCognitionBackend()
+      : new DirectLLMBackend(llm, store, { runId, promptVersion: getPromptVersion() });
+
+    const result = await runSimulation({
+      store,
+      config,
+      backend,
+      runId,
+    });
+
+    io.stdout(`Pipeline ${result.status}\n`);
+    io.stdout(`  Run ID: ${result.runId}\n`);
+    io.stdout(`  Rounds: ${result.totalRounds}\n`);
+    io.stdout(`  Graph revision: ${graph.graphRevisionId}\n`);
+  } finally {
+    store.close();
+  }
+}
+
+function runInspectCommand(
+  opts: { db: string; actor: string; run?: string; json?: boolean },
+  io: CliIO
+): void {
+  const store = new SQLiteGraphStore(opts.db);
+  try {
+    const runId = opts.run ?? store.getLatestRunId();
+    if (!runId) throw new Error("No runs found in database.");
+
+    const actor = resolveActorByName(store, runId, opts.actor);
+    const context = store.queryActorContext(actor.id, runId);
+
+    if (opts.json) {
+      io.stdout(JSON.stringify(context, null, 2) + "\n");
+      return;
+    }
+
+    io.stdout(formatActorContext(context) + "\n");
+  } finally {
+    store.close();
+  }
+}
+
 export function createProgram(io: CliIO = defaultIO): Command {
   const program = new Command()
     .name("seldonclaw")
@@ -314,6 +579,59 @@ export function createProgram(io: CliIO = defaultIO): Command {
   // ═══════════════════════════════════════════════════════
   // SIMULATE
   // ═══════════════════════════════════════════════════════
+
+  program
+    .command("run")
+    .description("Full pipeline: ingest -> analyze -> generate -> simulate")
+    .requiredOption("--docs <dir>", "directory with source documents")
+    .option("--db <path>", "SQLite database path", "simulation.db")
+    .option("--hypothesis <text>", "scenario hypothesis")
+    .option("--rounds <n>", "override number of rounds")
+    .option("--seed <n>", "PRNG seed")
+    .option("--config <path>", "config YAML file")
+    .option("--run <id>", "run ID")
+    .option("--mock", "use mock LLM + mock cognition backend")
+    .action(async (opts) => {
+      await runPipelineCommand(opts, io);
+    });
+
+  program
+    .command("ingest")
+    .description("Ingest documents into the knowledge graph store")
+    .requiredOption("--docs <dir>", "directory with source documents")
+    .option("--db <path>", "SQLite database path", "simulation.db")
+    .action(async (opts) => {
+      await runIngestCommand(opts, io);
+    });
+
+  program
+    .command("analyze")
+    .description("Extract ontology + claims and build the knowledge graph")
+    .option("--db <path>", "SQLite database path", "simulation.db")
+    .option("--config <path>", "config YAML file")
+    .option("--mock", "use MockLLMClient")
+    .action(async (opts) => {
+      await runAnalyzeCommand(opts, io);
+    });
+
+  program
+    .command("generate")
+    .description("Generate actor profiles from the knowledge graph")
+    .option("--db <path>", "SQLite database path", "simulation.db")
+    .option("--run <id>", "run ID")
+    .option("--config <path>", "config YAML file")
+    .option("--hypothesis <text>", "scenario hypothesis")
+    .option("--max-actors <n>", "cap number of generated actors")
+    .option("--mock", "use MockLLMClient")
+    .action(async (opts) => {
+      await runGenerateCommand(
+        {
+          ...opts,
+          maxActors: opts.maxActors,
+        },
+        io
+      );
+    });
 
   program
     .command("simulate")
@@ -345,6 +663,17 @@ export function createProgram(io: CliIO = defaultIO): Command {
   // ═══════════════════════════════════════════════════════
   // INTERVIEW
   // ═══════════════════════════════════════════════════════
+
+  program
+    .command("inspect")
+    .description("Inspect actor state and recent context")
+    .requiredOption("--actor <name>", "actor name, handle, or ID")
+    .option("--db <path>", "SQLite database path", "simulation.db")
+    .option("--run <id>", "run ID")
+    .option("--json", "output raw JSON context")
+    .action((opts) => {
+      runInspectCommand(opts, io);
+    });
 
   program
     .command("interview")
@@ -616,11 +945,6 @@ export function createProgram(io: CliIO = defaultIO): Command {
   // ═══════════════════════════════════════════════════════
 
   const stubs = [
-    { name: "run", desc: "Full pipeline: ingest → analyze → generate → simulate" },
-    { name: "ingest", desc: "Ingest documents into knowledge graph" },
-    { name: "analyze", desc: "Run ontology analysis on knowledge graph" },
-    { name: "generate", desc: "Generate actor profiles from knowledge graph" },
-    { name: "inspect", desc: "Inspect actor details" },
     { name: "resume", desc: "Resume simulation from last snapshot" },
     { name: "replay", desc: "Replay simulation from decision cache" },
   ];

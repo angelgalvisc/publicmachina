@@ -130,18 +130,22 @@ cp .env.example .env
 
 The `init` command generates a `seldonclaw.config.yaml` with model selection, API key references (never raw secrets), and output directory configuration.
 
-### Run a Prepared Simulation Database
+### Run the Full Pipeline
 
-Today, the public CLI exposes the simulation engine, reporting, interviews, CKP export/import, and shell.
-The full end-to-end pipeline commands (`run`, `ingest`, `analyze`, `generate`) still exist as planned stubs, so
-`simulate` currently expects an existing SQLite database with a run and actors already present.
+The CLI now exposes both the end-to-end pipeline and the lower-level stages.
 
 ```bash
-# From a source checkout
-node dist/index.js simulate --db simulation.db --run my-run --rounds 5
+# Full pipeline: ingest -> analyze -> generate -> simulate
+node dist/index.js run --db simulation.db --docs ./tests/fixtures/sample-docs --run my-run --rounds 5 --mock
 
-# With mock backend (no API key needed)
-node dist/index.js simulate --db simulation.db --run my-run --rounds 3 --mock
+# Lower-level staged commands are also available
+node dist/index.js ingest --db simulation.db --docs ./tests/fixtures/sample-docs
+node dist/index.js analyze --db simulation.db --mock
+node dist/index.js generate --db simulation.db --run my-run --hypothesis "Tuition protests intensify" --mock
+node dist/index.js simulate --db simulation.db --run my-run --rounds 5 --mock
+
+# Use the real LLM backend once your config and API key are in place
+node dist/index.js run --db simulation.db --docs ./docs --run my-real-run --rounds 5
 ```
 
 ### Analyze Results
@@ -175,7 +179,12 @@ node dist/index.js import-agent --bundle ./exports --db other-sim.db --run new-r
 | Command | Description |
 |---------|-------------|
 | `simulate` | Run a simulation (supports `--mock` for testing) |
+| `run` | Full pipeline: ingest -> analyze -> generate -> simulate |
+| `ingest` | Ingest source documents into the provenance store |
+| `analyze` | Extract ontology + claims and build the knowledge graph |
+| `generate` | Generate actor profiles from the knowledge graph |
 | `stats` | Print run summary, round counts, tier breakdown |
+| `inspect` | Show actor context, beliefs, topics, and recent posts |
 | `report` | Generate metrics report with optional LLM narrative |
 | `interview` | Interview an actor (single question or REPL mode) |
 | `export-agent` | Export actor as CKP bundle |

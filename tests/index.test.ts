@@ -24,6 +24,10 @@ function makeTempDbPath(): string {
   return join(dir, "simulation.db");
 }
 
+function fixtureDocsDir(): string {
+  return join(process.cwd(), "tests", "fixtures", "sample-docs");
+}
+
 function makeActor(overrides: Partial<ActorRow> = {}): ActorRow {
   return {
     id: "actor-1",
@@ -120,6 +124,160 @@ describe("CLI simulate", () => {
 
     expect(run?.status).toBe("completed");
     expect(summary.roundsCompleted).toBe(1);
+  });
+});
+
+describe("CLI pipeline", () => {
+  it("ingests documents through commander", async () => {
+    const dbPath = makeTempDbPath();
+    const capture = makeIO();
+
+    await runCli(
+      ["node", "seldonclaw", "ingest", "--db", dbPath, "--docs", fixtureDocsDir()],
+      capture.io
+    );
+
+    expect(capture.getStdout()).toContain("Ingested documents");
+
+    const store = new SQLiteGraphStore(dbPath);
+    const docs = store.getAllDocuments();
+    store.close();
+    expect(docs.length).toBeGreaterThan(0);
+  });
+
+  it("analyzes the corpus and builds the graph with --mock", async () => {
+    const dbPath = makeTempDbPath();
+    const store = new SQLiteGraphStore(dbPath);
+    store.close();
+
+    await runCli(
+      ["node", "seldonclaw", "ingest", "--db", dbPath, "--docs", fixtureDocsDir()],
+      makeIO().io
+    );
+
+    const capture = makeIO();
+    await runCli(
+      ["node", "seldonclaw", "analyze", "--db", dbPath, "--mock"],
+      capture.io
+    );
+
+    expect(capture.getStdout()).toContain("Analysis complete");
+
+    const verifyStore = new SQLiteGraphStore(dbPath);
+    const entities = verifyStore.getAllActiveEntities();
+    verifyStore.close();
+    expect(entities.length).toBeGreaterThan(0);
+  });
+
+  it("generates profiles for a run with --mock", async () => {
+    const dbPath = makeTempDbPath();
+
+    await runCli(
+      ["node", "seldonclaw", "ingest", "--db", dbPath, "--docs", fixtureDocsDir()],
+      makeIO().io
+    );
+    await runCli(
+      ["node", "seldonclaw", "analyze", "--db", dbPath, "--mock"],
+      makeIO().io
+    );
+
+    const capture = makeIO();
+    await runCli(
+      [
+        "node",
+        "seldonclaw",
+        "generate",
+        "--db",
+        dbPath,
+        "--run",
+        "pipeline-run",
+        "--hypothesis",
+        "Tuition protests intensify",
+        "--mock",
+      ],
+      capture.io
+    );
+
+    expect(capture.getStdout()).toContain("Generated profiles for run pipeline-run");
+
+    const verifyStore = new SQLiteGraphStore(dbPath);
+    const actors = verifyStore.getActorsByRun("pipeline-run");
+    verifyStore.close();
+    expect(actors.length).toBeGreaterThan(0);
+  });
+
+  it("runs the full pipeline end-to-end with --mock", async () => {
+    const dbPath = makeTempDbPath();
+    const capture = makeIO();
+
+    await runCli(
+      [
+        "node",
+        "seldonclaw",
+        "run",
+        "--db",
+        dbPath,
+        "--docs",
+        fixtureDocsDir(),
+        "--run",
+        "e2e-run",
+        "--hypothesis",
+        "Negative sentiment spreads faster than positive",
+        "--rounds",
+        "2",
+        "--mock",
+      ],
+      capture.io
+    );
+
+    const output = capture.getStdout();
+    expect(output).toContain("Pipeline completed");
+    expect(output).toContain("Run ID: e2e-run");
+
+    const verifyStore = new SQLiteGraphStore(dbPath);
+    const run = verifyStore.getRun("e2e-run");
+    const actors = verifyStore.getActorsByRun("e2e-run");
+    const summary = verifyStore.getRunRoundSummary("e2e-run");
+    verifyStore.close();
+
+    expect(run?.status).toBe("completed");
+    expect(actors.length).toBeGreaterThan(0);
+    expect(summary.roundsCompleted).toBe(2);
+  });
+
+  it("inspects an actor after generation", async () => {
+    const dbPath = makeTempDbPath();
+
+    await runCli(
+      [
+        "node",
+        "seldonclaw",
+        "run",
+        "--db",
+        dbPath,
+        "--docs",
+        fixtureDocsDir(),
+        "--run",
+        "inspect-run",
+        "--rounds",
+        "1",
+        "--mock",
+      ],
+      makeIO().io
+    );
+
+    const store = new SQLiteGraphStore(dbPath);
+    const actor = store.getActorsByRun("inspect-run")[0];
+    store.close();
+
+    const capture = makeIO();
+    await runCli(
+      ["node", "seldonclaw", "inspect", "--db", dbPath, "--run", "inspect-run", "--actor", actor.name],
+      capture.io
+    );
+
+    expect(capture.getStdout()).toContain(actor.name);
+    expect(capture.getStdout()).toContain("Personality:");
   });
 });
 
