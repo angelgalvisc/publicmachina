@@ -100,6 +100,17 @@ export interface SearchConfig {
   cutoffDate: string;
   strictCutoff: boolean;
   enabledTiers: Array<"A" | "B">;
+  maxActorsPerRound: number;
+  maxActorsByTier: {
+    A: number;
+    B: number;
+  };
+  allowArchetypes: string[];
+  denyArchetypes: string[];
+  allowProfessions: string[];
+  denyProfessions: string[];
+  allowActors: string[];
+  denyActors: string[];
   maxResultsPerQuery: number;
   maxQueriesPerActor: number;
   categories: string;
@@ -230,6 +241,17 @@ const DEFAULTS: SimConfig = {
     cutoffDate: "9999-12-31",
     strictCutoff: true,
     enabledTiers: ["A", "B"],
+    maxActorsPerRound: 4,
+    maxActorsByTier: {
+      A: 2,
+      B: 2,
+    },
+    allowArchetypes: [],
+    denyArchetypes: [],
+    allowProfessions: [],
+    denyProfessions: [],
+    allowActors: [],
+    denyActors: [],
     maxResultsPerQuery: 5,
     maxQueriesPerActor: 2,
     categories: "news",
@@ -524,6 +546,30 @@ function validateConfig(config: SimConfig): void {
       new ConfigError(
         'enabledTiers may only contain "A" and "B"',
         "search.enabledTiers"
+      )
+    );
+  }
+  if (config.search.maxActorsPerRound < 0) {
+    errors.push(
+      new ConfigError(
+        "maxActorsPerRound must be >= 0",
+        "search.maxActorsPerRound"
+      )
+    );
+  }
+  if (config.search.maxActorsByTier.A < 0) {
+    errors.push(
+      new ConfigError(
+        "maxActorsByTier.A must be >= 0",
+        "search.maxActorsByTier.A"
+      )
+    );
+  }
+  if (config.search.maxActorsByTier.B < 0) {
+    errors.push(
+      new ConfigError(
+        "maxActorsByTier.B must be >= 0",
+        "search.maxActorsByTier.B"
       )
     );
   }

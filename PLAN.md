@@ -2016,7 +2016,7 @@ Two post-MVP extensions were added after the core engine stabilized. They were i
 **Goal:** let Tier A/B actors enrich decisions with auditable real-world context without breaking replayability.
 
 **Tasks**
-1. Add `search` config with endpoint, cutoff, tiers, result limits, and timeout.
+1. Add `search` config with endpoint, cutoff, tiers, eligibility policy, result limits, and timeout.
 2. Add `search_cache` for cache-first reuse and `search_requests` for per-actor per-round audit.
 3. Introduce `search.ts`:
    - `SearchProvider` interface
@@ -2026,9 +2026,14 @@ Two post-MVP extensions were added after the core engine stabilized. They were i
    - prompt context formatting
 4. Extend `DecisionRequest` with optional `webContext`.
 5. Derive search queries deterministically during scheduler staging.
-6. Resolve web searches only for enabled Tier A/B jobs during concurrent execution.
-7. Persist `search_requests` in the round transaction.
-8. Extend `doctor` to validate the SearXNG endpoint when search is enabled.
+6. Select search-enabled actors deterministically by policy:
+   - tier eligibility
+   - archetype / profession allow-deny lists
+   - explicit actor allow-deny lists
+   - per-round and per-tier budgets
+7. Resolve web searches only for selected Tier A/B jobs during concurrent execution.
+8. Persist `search_requests` in the round transaction.
+9. Extend `doctor` to validate the SearXNG endpoint when search is enabled.
 
 **Dependency chain**
 - config/schema/types/store first
@@ -2041,6 +2046,8 @@ Two post-MVP extensions were added after the core engine stabilized. They were i
 
 **Runtime contract**
 - `search.enabled = false` preserves the original behavior.
+- `maxActorsPerRound` and `maxActorsByTier` cap who can search in a round.
+- `allowArchetypes` / `denyArchetypes`, `allowProfessions` / `denyProfessions`, and `allowActors` / `denyActors` control which actors may search.
 - `search_cache` stores reusable result sets by `(query, cutoff_date, language, categories)`.
 - `search_requests` records which actor searched what in each round.
 - `DecisionRequest.webContext` is part of the replay hash.

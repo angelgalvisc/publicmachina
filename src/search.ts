@@ -19,6 +19,11 @@ export interface SearchExecution {
   results: SearchResult[];
 }
 
+export interface SearchCandidate {
+  actor: ActorRow;
+  tier: "A" | "B" | "C";
+}
+
 export interface SearchProviderOptions {
   language: string;
   categories: string;
@@ -258,6 +263,79 @@ export function shouldSearchTier(
   return config.enabled && tier !== "C" && config.enabledTiers.includes(tier);
 }
 
+export function canActorSearch(
+  actor: ActorRow,
+  tier: "A" | "B" | "C",
+  config: SearchConfig
+): boolean {
+  if (!shouldSearchTier(tier, config)) return false;
+
+  const actorTokens = [actor.id, actor.handle ?? "", actor.name]
+    .map(normalizeToken)
+    .filter(Boolean);
+  const denyActors = new Set(config.denyActors.map(normalizeToken).filter(Boolean));
+  if (actorTokens.some((token) => denyActors.has(token))) {
+    return false;
+  }
+
+  const allowActors = config.allowActors.map(normalizeToken).filter(Boolean);
+  if (
+    allowActors.length > 0 &&
+    !actorTokens.some((token) => allowActors.includes(token))
+  ) {
+    return false;
+  }
+
+  const archetype = normalizeToken(actor.archetype);
+  if (config.denyArchetypes.map(normalizeToken).includes(archetype)) {
+    return false;
+  }
+  const allowedArchetypes = config.allowArchetypes.map(normalizeToken).filter(Boolean);
+  if (allowedArchetypes.length > 0 && !allowedArchetypes.includes(archetype)) {
+    return false;
+  }
+
+  const profession = normalizeToken(actor.profession ?? "");
+  if (config.denyProfessions.map(normalizeToken).includes(profession)) {
+    return false;
+  }
+  const allowedProfessions = config.allowProfessions.map(normalizeToken).filter(Boolean);
+  if (allowedProfessions.length > 0 && !allowedProfessions.includes(profession)) {
+    return false;
+  }
+
+  return true;
+}
+
+export function selectSearchEnabledActors(
+  candidates: SearchCandidate[],
+  config: SearchConfig
+): Set<string> {
+  if (!config.enabled || config.maxActorsPerRound === 0) {
+    return new Set();
+  }
+
+  const eligible = candidates
+    .filter((candidate) => canActorSearch(candidate.actor, candidate.tier, config))
+    .sort(compareSearchCandidates);
+
+  const selected = new Set<string>();
+  const remainingPerTier = {
+    A: config.maxActorsByTier.A,
+    B: config.maxActorsByTier.B,
+  };
+
+  for (const candidate of eligible) {
+    if (selected.size >= config.maxActorsPerRound) break;
+    if (candidate.tier === "C") continue;
+    if (remainingPerTier[candidate.tier] <= 0) continue;
+    selected.add(candidate.actor.id);
+    remainingPerTier[candidate.tier]--;
+  }
+
+  return selected;
+}
+
 export function resolveSearchLanguage(
   actorLanguage: string | undefined,
   config: SearchConfig
@@ -391,4 +469,29 @@ function safeHostname(url: string): string {
   } catch {
     return "unknown-source";
   }
+}
+
+function compareSearchCandidates(a: SearchCandidate, b: SearchCandidate): number {
+  const tierRank = tierPriority(a.tier) - tierPriority(b.tier);
+  if (tierRank !== 0) return tierRank;
+
+  const influenceRank = b.actor.influence_weight - a.actor.influence_weight;
+  if (Math.abs(influenceRank) > Number.EPSILON) return influenceRank;
+
+  return a.actor.id.localeCompare(b.actor.id);
+}
+
+function tierPriority(tier: "A" | "B" | "C"): number {
+  switch (tier) {
+    case "A":
+      return 0;
+    case "B":
+      return 1;
+    default:
+      return 2;
+  }
+}
+
+function normalizeToken(value: string): string {
+  return value.trim().toLowerCase();
 }

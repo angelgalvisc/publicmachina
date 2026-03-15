@@ -123,6 +123,16 @@ search:
   cutoffDate: "2024-09-15"          # agents see nothing published after this date
   strictCutoff: true                # drop results without a published date
   enabledTiers: ["A", "B"]          # only LLM-backed tiers search
+  maxActorsPerRound: 4              # total search-enabled actors per round
+  maxActorsByTier:
+    A: 2                            # up to 2 tier-A actors search
+    B: 2                            # up to 2 tier-B actors search
+  allowArchetypes: ["media", "institution"]
+  denyArchetypes: []
+  allowProfessions: ["journalist", "analyst"]
+  denyProfessions: []
+  allowActors: []                   # match actor id, @handle, or name
+  denyActors: []
   maxResultsPerQuery: 5
   maxQueriesPerActor: 2
   categories: "news"
@@ -131,6 +141,13 @@ search:
 ```
 
 > **Prerequisite:** A running [SearXNG](https://docs.searxng.org/) instance with JSON output enabled. A Docker Compose setup takes under a minute. If search is disabled, the engine falls back to feed-only cognition with no behavior change.
+
+Search eligibility is policy-driven:
+
+- choose which cognition tiers may search
+- cap how many search-enabled actors run per round
+- split the budget by tier
+- allow or deny search by archetype, profession, or explicit actor identity
 
 ## Architecture
 

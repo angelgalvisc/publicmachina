@@ -35,8 +35,9 @@ import {
   formatSearchResults,
   resolveSearchLanguage,
   searchWithCache,
-  shouldSearchTier,
+  selectSearchEnabledActors,
   toSearchRequestEntries,
+  type SearchCandidate,
   type SearchExecution,
 } from "./search.js";
 
@@ -81,6 +82,7 @@ export async function scheduleRoundActions(
 ): Promise<ScheduledActorAction[]> {
   const immediate: ScheduledActorAction[] = [];
   const pending: PendingBackendDecision[] = [];
+  const searchCandidates: SearchCandidate[] = [];
   const lookbackRounds = opts.lookbackRounds ?? opts.config.cognition.interactionLookback;
 
   for (let index = 0; index < opts.activeActors.length; index++) {
@@ -110,6 +112,10 @@ export async function scheduleRoundActions(
       continue;
     }
 
+    if (opts.searchProvider) {
+      searchCandidates.push({ actor, tier: route.tier });
+    }
+
     const simContext = buildSimContext(
       actor,
       opts.store,
@@ -125,17 +131,6 @@ export async function scheduleRoundActions(
       simContext,
       opts.roundNum
     );
-    const searchQueries =
-      opts.searchProvider && shouldSearchTier(route.tier, opts.config.search)
-        ? buildSearchQueries(
-            actor,
-            actorTopics,
-            opts.activeEvents,
-            feed,
-            opts.config.search
-          )
-        : [];
-
     pending.push({
       index,
       actor,
@@ -143,8 +138,23 @@ export async function scheduleRoundActions(
       feed,
       route,
       request,
-      searchQueries,
+      searchQueries: [],
     });
+  }
+
+  const selectedForSearch = opts.searchProvider
+    ? selectSearchEnabledActors(searchCandidates, opts.config.search)
+    : new Set<string>();
+
+  for (const job of pending) {
+    if (!selectedForSearch.has(job.actor.id)) continue;
+    job.searchQueries = buildSearchQueries(
+      job.actor,
+      job.actorTopics,
+      opts.activeEvents,
+      job.feed,
+      opts.config.search
+    );
   }
 
   const resolved = await mapWithConcurrency(
