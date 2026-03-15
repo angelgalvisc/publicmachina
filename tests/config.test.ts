@@ -29,6 +29,8 @@ describe("config.ts", () => {
       expect(config.simulation.totalHours).toBe(72);
       expect(config.simulation.minutesPerRound).toBe(60);
       expect(config.simulation.timezone).toBe("America/Bogota");
+      expect(config.simulation.timeAccelerationMode).toBe("off");
+      expect(config.simulation.maxFastForwardRounds).toBe(24);
       expect(config.simulation.seed).toBe(42);
       expect(config.simulation.peakHours).toContain(9);
       expect(config.simulation.offPeakHours).toContain(3);
@@ -253,6 +255,24 @@ simulation:
         parseConfig(`
 simulation:
   concurrency: 0
+`);
+      }).toThrow(ConfigError);
+    });
+
+    it("rejects invalid timeAccelerationMode", () => {
+      expect(() => {
+        parseConfig(`
+simulation:
+  timeAccelerationMode: "warp"
+`);
+      }).toThrow(ConfigError);
+    });
+
+    it("rejects maxFastForwardRounds < 1", () => {
+      expect(() => {
+        parseConfig(`
+simulation:
+  maxFastForwardRounds: 0
 `);
       }).toThrow(ConfigError);
     });

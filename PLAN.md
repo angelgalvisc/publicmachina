@@ -1761,7 +1761,53 @@ NullClaw integration deferred — actors only need structured LLM completions, n
 | `interview.ts` | P2 | ✅ Phase 7 |
 | `shell.ts` | P2 | ✅ Phase 8 |
 
-**Phases 1-8 complete locally** (`389/389` tests, 27 test files). The remaining work is no longer missing core modules; it is validation, documentation upkeep, and future iteration.
+**Phases 1-8 complete locally, plus Phase 9A conservative time acceleration** (`394/394` tests across 27 test files). The remaining work is no longer missing core modules; it is validation, documentation upkeep, and future iteration.
+
+## Phase 9 — Time Acceleration
+
+Goal: reduce wall-clock cost for long quiet tails without breaking determinism or causal auditability.
+
+### Phase 9A — Conservative Fast-Forward
+
+Implemented contract:
+
+- new config:
+  - `simulation.timeAccelerationMode: "off" | "fast-forward"`
+  - `simulation.maxFastForwardRounds`
+- `off` preserves the existing round loop
+- `fast-forward` only compresses spans when all of the following are true:
+  - no recent posts remain in the propagation window
+  - no active events exist in the current round
+  - no scheduled events appear inside the compressed span
+  - no actors activate inside the compressed span
+- every compressed span is persisted to `skipped_rounds`
+- compressed rounds still receive `rounds` rows and snapshots at normal boundaries
+
+Design notes:
+
+- the policy lives outside `scheduler.ts`
+- `scheduler.ts` remains an execution mechanism
+- time compression policy lives in `time-policy.ts`
+- this avoids mixing simulation semantics with backend concurrency control
+
+Audit gates for 9A:
+
+- `timeAccelerationMode: "off"` must preserve existing behavior
+- compressed spans must remain visible in SQLite audit tables
+- scheduled events must stop compression before the event round
+- rounds with recent posts must not be compressed, because propagation may still fire
+
+### Phase 9B — Adaptive Round Size
+
+Future work. This will require refactoring modules that currently assume fixed `minutesPerRound`, especially:
+
+- `activation.ts`
+- `fatigue.ts`
+- `propagation.ts`
+
+### Phase 9C — Budget-Aware Execution
+
+Future work. This should introduce explicit admission/degradation policy for Tier A/B execution under wall-time or call budgets, while keeping the scheduler focused on bounded execution only.
 
 ## Report Pipeline (report.ts)
 

@@ -255,6 +255,8 @@ function renderInitConfig(answers: InitAnswers): string {
     "  minutesPerRound: 60",
     `  timezone: "${answers.timezone}"`,
     "  concurrency: 1",
+    '  timeAccelerationMode: "off"',
+    "  maxFastForwardRounds: 24",
     "  seed: 42",
     "  snapshotEvery: 10",
     "",

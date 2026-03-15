@@ -276,6 +276,19 @@ export interface SearchRequestRow {
   created_at?: string;
 }
 
+export interface SkippedRoundSpanRow {
+  id: string;
+  run_id: string;
+  from_round: number;
+  to_round: number;
+  sim_time_start: string;
+  sim_time_end: string;
+  reason: string;
+  novelty_score: number;
+  pending_events: number;
+  created_at?: string;
+}
+
 // ─── PlatformState projections (PLAN.md §PlatformState) ───
 
 export interface PostSnapshot {

@@ -19,7 +19,7 @@ SeldonClaw's relational model is organized in five layers:
 3. **Social Simulation**
    Actors, communities, follows, posts, exposures, narratives, memories, and embedding caches.
 4. **Observability**
-   Telemetry, round summaries, and per-actor search audit logs.
+   Telemetry, round summaries, skipped-round audit spans, and per-actor search audit logs.
 5. **Reproducibility**
    Run manifests, decision cache, snapshots, and reusable web search cache.
 
@@ -256,6 +256,7 @@ erDiagram
   RUN_MANIFEST ||--o{ DECISION_CACHE : caches
   RUN_MANIFEST ||--o{ SNAPSHOTS : checkpoints
   RUN_MANIFEST ||--o{ SEARCH_REQUESTS : search_audit
+  RUN_MANIFEST ||--o{ SKIPPED_ROUNDS : time_acceleration
   ACTORS ||--o{ TELEMETRY : actor_events
   ACTORS ||--o{ DECISION_CACHE : decisions
   ACTORS ||--o{ SEARCH_REQUESTS : search_actor
@@ -301,6 +302,15 @@ erDiagram
     text cutoff_date
     int result_count
   }
+  SKIPPED_ROUNDS {
+    text id PK
+    text run_id FK
+    int from_round
+    int to_round
+    text sim_time_start
+    text sim_time_end
+    text reason
+  }
   SEARCH_CACHE {
     text id PK
     text query
@@ -340,6 +350,7 @@ erDiagram
   RUN_MANIFEST ||--o{ DECISION_CACHE : scopes
   RUN_MANIFEST ||--o{ SNAPSHOTS : scopes
   RUN_MANIFEST ||--o{ SEARCH_REQUESTS : scopes
+  RUN_MANIFEST ||--o{ SKIPPED_ROUNDS : scopes
 
   ENTITIES ||--o{ ACTORS : optional_origin
   ACTORS ||--o{ ACTOR_TOPICS : has
@@ -367,7 +378,7 @@ erDiagram
 ## Core invariants
 
 - `documents`, `chunks`, `claims`, `entities`, and `edges` are the base knowledge corpus.
-- `actors`, `posts`, `follows`, `exposures`, `narratives`, `actor_memories`, `telemetry`, `rounds`, `decision_cache`, `snapshots`, and `search_requests` are **run-scoped**.
+- `actors`, `posts`, `follows`, `exposures`, `narratives`, `actor_memories`, `telemetry`, `rounds`, `decision_cache`, `snapshots`, `search_requests`, and `skipped_rounds` are **run-scoped**.
 - `communities` and `community_overlap` are also **run-scoped** in the current implementation.
 - `post_embeddings` and `actor_interest_embeddings` are per-post / per-actor caches keyed by model id.
 - `search_cache` is reusable across runs and intentionally not foreign-keyed to a specific actor or round.

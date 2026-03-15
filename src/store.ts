@@ -27,6 +27,7 @@ import type {
   ActorInterestEmbeddingRow,
   SearchCacheRow,
   SearchRequestRow,
+  SkippedRoundSpanRow,
   PostSnapshot,
   ActorSnapshot,
   CommunitySnapshot,
@@ -284,6 +285,8 @@ export interface GraphStore {
   ): SearchCacheRow | null;
   upsertSearchCache(entry: SearchCacheRow): void;
   addSearchRequest(entry: SearchRequestRow): void;
+  addSkippedRoundSpan(entry: SkippedRoundSpanRow): void;
+  getSkippedRoundSpans(runId: string): SkippedRoundSpanRow[];
 
   // Read-only SQL execution (shell.ts query boundary)
   executeReadOnlySql(sql: string): Array<Record<string, unknown>>;
@@ -1714,6 +1717,36 @@ export class SQLiteGraphStore implements GraphStore {
         entry.cache_hit,
         entry.result_count
       );
+  }
+
+  addSkippedRoundSpan(entry: SkippedRoundSpanRow): void {
+    this.db
+      .prepare(
+        `INSERT INTO skipped_rounds
+         (id, run_id, from_round, to_round, sim_time_start, sim_time_end, reason, novelty_score, pending_events)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(
+        entry.id,
+        entry.run_id,
+        entry.from_round,
+        entry.to_round,
+        entry.sim_time_start,
+        entry.sim_time_end,
+        entry.reason,
+        entry.novelty_score,
+        entry.pending_events
+      );
+  }
+
+  getSkippedRoundSpans(runId: string): SkippedRoundSpanRow[] {
+    return this.db
+      .prepare(
+        `SELECT * FROM skipped_rounds
+         WHERE run_id = ?
+         ORDER BY from_round ASC, to_round ASC`
+      )
+      .all(runId) as SkippedRoundSpanRow[];
   }
 
   executeReadOnlySql(sql: string): Array<Record<string, unknown>> {

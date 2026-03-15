@@ -46,7 +46,7 @@
     },
     {
       "name": "observability",
-      "tables": ["telemetry", "rounds", "search_requests"]
+      "tables": ["telemetry", "rounds", "search_requests", "skipped_rounds"]
     },
     {
       "name": "reproducibility",
@@ -558,6 +558,27 @@
       ]
     },
     {
+      "name": "skipped_rounds",
+      "kind": "table",
+      "scope": "run_scoped",
+      "primary_key": ["id"],
+      "columns": [
+        {"name": "id", "type": "TEXT", "nullable": false},
+        {"name": "run_id", "type": "TEXT", "nullable": false},
+        {"name": "from_round", "type": "INTEGER", "nullable": false},
+        {"name": "to_round", "type": "INTEGER", "nullable": false},
+        {"name": "sim_time_start", "type": "TEXT", "nullable": false},
+        {"name": "sim_time_end", "type": "TEXT", "nullable": false},
+        {"name": "reason", "type": "TEXT", "nullable": false},
+        {"name": "novelty_score", "type": "REAL", "nullable": false},
+        {"name": "pending_events", "type": "INTEGER", "nullable": false},
+        {"name": "created_at", "type": "TEXT", "nullable": true}
+      ],
+      "foreign_keys": [
+        {"columns": ["run_id"], "references": {"table": "run_manifest", "columns": ["id"]}}
+      ]
+    },
+    {
       "name": "telemetry",
       "kind": "table",
       "scope": "run_scoped",
@@ -674,6 +695,7 @@
     {"from": "run_manifest", "to": "decision_cache", "cardinality": "1:N", "type": "run_scope", "via": ["decision_cache.run_id"]},
     {"from": "run_manifest", "to": "snapshots", "cardinality": "1:N", "type": "run_scope", "via": ["snapshots.run_id"]},
     {"from": "run_manifest", "to": "search_requests", "cardinality": "1:N", "type": "run_scope", "via": ["search_requests.run_id"]},
+    {"from": "run_manifest", "to": "skipped_rounds", "cardinality": "1:N", "type": "run_scope", "via": ["skipped_rounds.run_id"]},
     {"from": "entities", "to": "actors", "cardinality": "1:N", "type": "entity_to_actor", "via": ["actors.entity_id"]},
     {"from": "actors", "to": "actor_topics", "cardinality": "1:N", "type": "profile_topics", "via": ["actor_topics.actor_id"]},
     {"from": "actors", "to": "actor_beliefs", "cardinality": "1:N", "type": "belief_state", "via": ["actor_beliefs.actor_id"]},

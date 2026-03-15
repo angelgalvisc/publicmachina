@@ -39,6 +39,10 @@ import {
   createEmbeddingProvider,
 } from "./embeddings.js";
 import { createSearchProvider } from "./search.js";
+import {
+  planIdleFastForward,
+  shouldAttemptIdleFastForward,
+} from "./time-policy.js";
 
 // ═══════════════════════════════════════════════════════
 // TYPES
@@ -182,10 +186,6 @@ export async function runSimulation(opts: EngineOptions): Promise<EngineResult> 
           );
           narrative.peak_round = roundNum;
         }
-        store.updateNarrative(narrative.id, {
-          current_intensity: narrative.current_intensity,
-          peak_round: narrative.peak_round,
-        });
       }
 
       // Build RoundContext with real events
@@ -210,6 +210,100 @@ export async function runSimulation(opts: EngineOptions): Promise<EngineResult> 
         actorTopicsMap,
         updatedNarratives
       );
+
+      if (
+        shouldAttemptIdleFastForward({
+          mode: config.simulation.timeAccelerationMode,
+          currentState: state,
+          currentEvents: activeEvents,
+          currentActiveActors: activeActors,
+        })
+      ) {
+        const fastForwardPlan = planIdleFastForward({
+          mode: config.simulation.timeAccelerationMode,
+          startRoundNum: roundNum,
+          totalRounds: numRounds,
+          currentSimTimestamp: simTimestamp,
+          currentState: state,
+          currentEvents: activeEvents,
+          currentActiveActors: activeActors,
+          currentNarratives: updatedNarratives,
+          allActors,
+          actorTopicsMap,
+          activationConfig,
+          eventsConfig: config.events,
+          fatigueConfig: config.fatigue,
+          startTime,
+          minutesPerRound: config.simulation.minutesPerRound,
+          maxFastForwardRounds: config.simulation.maxFastForwardRounds,
+          rng,
+        });
+
+        if (fastForwardPlan && fastForwardPlan.rounds.length > 0) {
+          const actorStates =
+            config.simulation.snapshotEvery > 0
+              ? buildActorSnapshotState(store, runId)
+              : [];
+
+          store.executeInTransaction(() => {
+            persistNarratives(store, fastForwardPlan.finalNarratives);
+
+            for (const [index, skippedRound] of fastForwardPlan.rounds.entries()) {
+              updateRound(store, {
+                num: skippedRound.roundNum,
+                runId,
+                simTime: skippedRound.simTimestamp,
+                activeActors: 0,
+                totalPosts: 0,
+                totalActions: 0,
+                tierACalls: 0,
+                tierBCalls: 0,
+                tierCActions: 0,
+                events: [],
+                wallTimeMs: index === 0 ? Date.now() - roundT0 : 0,
+              });
+
+              if (
+                config.simulation.snapshotEvery > 0 &&
+                skippedRound.roundNum > 0 &&
+                skippedRound.roundNum % config.simulation.snapshotEvery === 0
+              ) {
+                saveSnapshot(
+                  store,
+                  runId,
+                  skippedRound.roundNum,
+                  actorStates,
+                  buildNarrativeSnapshotState(skippedRound.narratives),
+                  rng
+                );
+              }
+            }
+
+            const firstRound = fastForwardPlan.rounds[0];
+            const lastRound =
+              fastForwardPlan.rounds[fastForwardPlan.rounds.length - 1];
+            store.addSkippedRoundSpan({
+              id: stableId(
+                "skip",
+                runId,
+                String(firstRound.roundNum),
+                String(lastRound.roundNum)
+              ),
+              run_id: runId,
+              from_round: firstRound.roundNum,
+              to_round: lastRound.roundNum,
+              sim_time_start: firstRound.simTimestamp,
+              sim_time_end: lastRound.simTimestamp,
+              reason: fastForwardPlan.reason,
+              novelty_score: 0,
+              pending_events: fastForwardPlan.pendingEvents,
+            });
+          });
+
+          roundNum = fastForwardPlan.rounds[fastForwardPlan.rounds.length - 1].roundNum;
+          continue;
+        }
+      }
 
       // Stage actor decisions deterministically, then resolve Tier A/B with bounded concurrency.
       const feedState = embeddingProvider
@@ -245,6 +339,8 @@ export async function runSimulation(opts: EngineOptions): Promise<EngineResult> 
       const tierCActions = scheduledActions.filter((a) => a.route.tier === "C").length;
 
       store.executeInTransaction(() => {
+        persistNarratives(store, updatedNarratives);
+
         for (const scheduled of scheduledActions) {
           const executable: ExecutableActorAction = {
             actor: scheduled.actor,
@@ -327,24 +423,14 @@ export async function runSimulation(opts: EngineOptions): Promise<EngineResult> 
         roundNum > 0 &&
         roundNum % config.simulation.snapshotEvery === 0
       ) {
-        const actorStates = store.getActorsByRun(runId).map((actor) => ({
-          id: actor.id,
-          stance: actor.stance,
-          sentiment_bias: actor.sentiment_bias,
-          activity_level: actor.activity_level,
-          influence_weight: actor.influence_weight,
-          follower_count: actor.follower_count,
-          following_count: actor.following_count,
-        }));
-        const narrativeStates = store.getNarrativesByRun(runId).map((narrative) => ({
-          topic: narrative.topic,
-          currentIntensity: narrative.current_intensity,
-          totalPosts: narrative.total_posts,
-          dominantSentiment: narrative.dominant_sentiment,
-          peakRound: narrative.peak_round,
-        }));
-
-        saveSnapshot(store, runId, roundNum, actorStates, narrativeStates, rng);
+        saveSnapshot(
+          store,
+          runId,
+          roundNum,
+          buildActorSnapshotState(store, runId),
+          buildNarrativeSnapshotState(store.getNarrativesByRun(runId)),
+          rng
+        );
       }
     }
 
@@ -526,4 +612,38 @@ function computeSimTimestamp(
 function computeSimHour(simTimestamp: string): number {
   const date = new Date(simTimestamp);
   return date.getUTCHours();
+}
+
+function persistNarratives(
+  store: GraphStore,
+  narratives: ReturnType<typeof updateFatigue>["updated"]
+): void {
+  for (const narrative of narratives) {
+    store.updateNarrative(narrative.id, {
+      current_intensity: narrative.current_intensity,
+      peak_round: narrative.peak_round,
+    });
+  }
+}
+
+function buildActorSnapshotState(store: GraphStore, runId: string) {
+  return store.getActorsByRun(runId).map((actor) => ({
+    id: actor.id,
+    stance: actor.stance,
+    sentiment_bias: actor.sentiment_bias,
+    activity_level: actor.activity_level,
+    influence_weight: actor.influence_weight,
+    follower_count: actor.follower_count,
+    following_count: actor.following_count,
+  }));
+}
+
+function buildNarrativeSnapshotState(narratives: ReturnType<typeof updateFatigue>["updated"]) {
+  return narratives.map((narrative) => ({
+    topic: narrative.topic,
+    currentIntensity: narrative.current_intensity,
+    totalPosts: narrative.total_posts,
+    dominantSentiment: narrative.dominant_sentiment,
+    peakRound: narrative.peak_round,
+  }));
 }

@@ -411,6 +411,116 @@ describe("runSimulation — scheduler v2", () => {
 });
 
 // ═══════════════════════════════════════════════════════
+// TIME ACCELERATION
+// ═══════════════════════════════════════════════════════
+
+describe("runSimulation — time acceleration", () => {
+  it("records a skipped span for long quiet tails when fast-forward is enabled", async () => {
+    const runId = "run-fast-forward-empty";
+    const cfg = makeTestConfig({
+      totalHours: 5,
+      timeAccelerationMode: "fast-forward",
+      maxFastForwardRounds: 10,
+    });
+
+    const result = await runSimulation({ store, config: cfg, backend, runId });
+
+    expect(result.status).toBe("completed");
+
+    const rounds = (store as any).db
+      .prepare("SELECT COUNT(*) as c FROM rounds WHERE run_id = ?")
+      .get(runId).c as number;
+    expect(rounds).toBe(5);
+
+    const skipped = store.getSkippedRoundSpans(runId);
+    expect(skipped).toHaveLength(1);
+    expect(skipped[0].from_round).toBe(0);
+    expect(skipped[0].to_round).toBe(4);
+  });
+
+  it("stops fast-forward before a scheduled event round", async () => {
+    const runId = "run-fast-forward-event";
+    createRun(store, runId);
+    store.addActor(
+      makeActor({
+        id: "institution-1",
+        run_id: runId,
+        archetype: "institution",
+        activity_level: 0,
+        influence_weight: 0.9,
+      })
+    );
+    const cfg = makeTestConfig({
+      totalHours: 4,
+      timeAccelerationMode: "fast-forward",
+      maxFastForwardRounds: 10,
+    });
+    cfg.events.scheduled = [
+      {
+        round: 2,
+        content: "Breaking policy announcement",
+        topics: ["policy"],
+        actorArchetype: "institution",
+      },
+    ];
+
+    const result = await runSimulation({ store, config: cfg, backend, runId });
+
+    expect(result.status).toBe("completed");
+
+    const skipped = store.getSkippedRoundSpans(runId);
+    expect(skipped).toHaveLength(1);
+    expect(skipped[0].from_round).toBe(0);
+    expect(skipped[0].to_round).toBe(1);
+
+    const roundTwo = (store as any).db
+      .prepare("SELECT events FROM rounds WHERE run_id = ? AND num = 2")
+      .get(runId) as { events: string | null };
+    expect(roundTwo.events).toContain("Breaking policy announcement");
+
+    const eventPosts = (store as any).db
+      .prepare("SELECT COUNT(*) as c FROM posts WHERE run_id = ? AND round_num = 2")
+      .get(runId).c as number;
+    expect(eventPosts).toBeGreaterThan(0);
+  });
+
+  it("does not fast-forward while recent posts are still in the propagation window", async () => {
+    const runId = "run-fast-forward-blocked";
+    createRun(store, runId);
+    const dormant = makeActor({
+      id: "dormant-author",
+      run_id: runId,
+      activity_level: 0,
+      influence_weight: 0.1,
+    });
+    store.addActor(dormant);
+    store.addPost({
+      id: "seed-post",
+      run_id: runId,
+      author_id: dormant.id,
+      content: "still circulating",
+      round_num: 0,
+      sim_timestamp: "2024-01-01T00:00:00",
+      likes: 0,
+      reposts: 0,
+      comments: 0,
+      reach: 0,
+      sentiment: 0,
+    });
+
+    const cfg = makeTestConfig({
+      totalHours: 1,
+      timeAccelerationMode: "fast-forward",
+      maxFastForwardRounds: 10,
+    });
+    const result = await runSimulation({ store, config: cfg, backend, runId });
+
+    expect(result.status).toBe("completed");
+    expect(store.getSkippedRoundSpans(runId)).toHaveLength(0);
+  });
+});
+
+// ═══════════════════════════════════════════════════════
 // DECISION EXECUTION
 // ═══════════════════════════════════════════════════════
 

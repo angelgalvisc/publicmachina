@@ -376,6 +376,20 @@ CREATE TABLE IF NOT EXISTS search_requests (
   FOREIGN KEY (actor_id) REFERENCES actors(id)
 );
 
+CREATE TABLE IF NOT EXISTS skipped_rounds (
+  id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL,
+  from_round INTEGER NOT NULL,
+  to_round INTEGER NOT NULL,
+  sim_time_start TEXT NOT NULL,
+  sim_time_end TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  novelty_score REAL NOT NULL DEFAULT 0,
+  pending_events INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY (run_id) REFERENCES run_manifest(id)
+);
+
 -- ═══════════════════════════════════════
 -- TELEMETRY + ROUNDS
 -- ═══════════════════════════════════════
@@ -473,4 +487,5 @@ CREATE INDEX IF NOT EXISTS idx_post_embeddings_model ON post_embeddings(model_id
 CREATE INDEX IF NOT EXISTS idx_actor_interest_embeddings_model ON actor_interest_embeddings(model_id);
 CREATE INDEX IF NOT EXISTS idx_search_cache_lookup ON search_cache(query, cutoff_date, language, categories);
 CREATE INDEX IF NOT EXISTS idx_search_requests_actor_round ON search_requests(run_id, actor_id, round_num DESC);
+CREATE INDEX IF NOT EXISTS idx_skipped_rounds_run_range ON skipped_rounds(run_id, from_round, to_round);
 `;

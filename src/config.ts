@@ -33,6 +33,8 @@ export interface SimulationConfig {
   minutesPerRound: number;
   timezone: string;
   concurrency: number;
+  timeAccelerationMode: "off" | "fast-forward";
+  maxFastForwardRounds: number;
   seed: number;
   snapshotEvery: number;
   peakHours: number[];
@@ -181,6 +183,8 @@ const DEFAULTS: SimConfig = {
     minutesPerRound: 60,
     timezone: "America/Bogota",
     concurrency: 1,
+    timeAccelerationMode: "off",
+    maxFastForwardRounds: 24,
     seed: 42,
     snapshotEvery: 10,
     peakHours: [8, 9, 10, 12, 13, 19, 20, 21, 22],
@@ -403,6 +407,25 @@ function validateConfig(config: SimConfig): void {
   if (config.simulation.concurrency < 1) {
     errors.push(
       new ConfigError("concurrency must be >= 1", "simulation.concurrency")
+    );
+  }
+  if (
+    config.simulation.timeAccelerationMode !== "off" &&
+    config.simulation.timeAccelerationMode !== "fast-forward"
+  ) {
+    errors.push(
+      new ConfigError(
+        'timeAccelerationMode must be "off" or "fast-forward"',
+        "simulation.timeAccelerationMode"
+      )
+    );
+  }
+  if (config.simulation.maxFastForwardRounds < 1) {
+    errors.push(
+      new ConfigError(
+        "maxFastForwardRounds must be >= 1",
+        "simulation.maxFastForwardRounds"
+      )
     );
   }
   if (config.simulation.platform !== "x") {

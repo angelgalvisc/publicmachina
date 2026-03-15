@@ -15,7 +15,7 @@
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg?style=flat-square)](LICENSE)
 [![Node](https://img.shields.io/badge/Node-%3E%3D18-339933?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.5+-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org)
-[![Tests](https://img.shields.io/badge/Tests-389_passing-brightgreen?style=flat-square)]()
+[![Tests](https://img.shields.io/badge/Tests-394_passing-brightgreen?style=flat-square)]()
 [![CKP](https://img.shields.io/badge/CKP-v0.2.6-orange?style=flat-square)](https://github.com/angelgalvisc/clawkernel)
 
 ---
@@ -66,6 +66,7 @@ At the operator level, it gives researchers and builders a way to design simulat
 - **Event injection** — Schedule exogenous shocks (breaking news, policy changes) that alter the simulation mid-run
 - **Agent memory** — Tier A/B actors accumulate deliberative memories across rounds for coherent follow-up behavior and interviews
 - **Feed algorithm** — Recency, popularity, relevance, echo chamber effects, and optional semantic similarity shape what each agent sees
+- **Idle fast-forward** — Quiet tails with no recent posts, no events, and no activated actors can be compressed into audited skipped spans
 - **CKP portability** — Export any agent as a portable bundle with beliefs, provenance, and A2A agent card
 - **Interactive shell** — Natural language queries over simulation data, actor interviews, live SQL access
 - **Zero-dependency audit** — One `.db` file contains the entire run: config, actors, posts, rounds, graphs, search cache
@@ -183,6 +184,26 @@ Search eligibility is policy-driven:
 
 `deny*` rules take precedence. `allow*` rules are additive: an actor may search if it matches any allowed actor, archetype, or profession rule.
 
+## Time Acceleration
+
+SeldonClaw now supports a conservative time-acceleration mode for long quiet tails. It does not invent behavior or skip active periods. Instead, it compresses stretches where the engine can prove that nothing actionable happens:
+
+- no recent posts remain in the propagation window
+- no active or scheduled events fire in the skipped span
+- no actors activate during the skipped span
+
+Every compressed span is persisted to `skipped_rounds` in SQLite, so the optimization remains inspectable.
+
+```yaml
+simulation:
+  totalHours: 72
+  minutesPerRound: 60
+  timeAccelerationMode: "fast-forward"  # or "off"
+  maxFastForwardRounds: 24
+```
+
+This is Phase 9A only: a conservative fast-forward path for quiet tails. Adaptive round size and budget-aware execution remain future phases.
+
 ## Architecture
 
 ```
@@ -203,6 +224,7 @@ Documents ──→ Ingest ──→ Knowledge Graph ──→ Ontology ──�
                                     │  Fatigue         │ what topics decay?
                                     │  Events          │ what shocks occur?
                                     │  Memory          │ what do they remember?
+                                    │  Time Policy     │ can this round be compressed?
                                     └─────────────────┘
                                          │
                               ┌──────────┼──────────┐
@@ -231,6 +253,7 @@ Documents ──→ Ingest ──→ Knowledge Graph ──→ Ontology ──�
 | `memory.ts` | Deliberative actor memory derivation and persistence | ~160 |
 | `embeddings.ts` | Deterministic embedding provider, cache, and state enrichment | ~220 |
 | `search.ts` | SearXNG client, temporal cutoff filtering, cache-first web context | ~500 |
+| `time-policy.ts` | Conservative time acceleration policy for quiet-tail compression | ~150 |
 | `design.ts` | Natural-language brief -> typed simulation spec -> rendered config | ~530 |
 | `profiles.ts` | LLM-powered actor generation from knowledge graph entities | ~610 |
 | `ontology.ts` | LLM-powered ontology extraction (entity types, edge types, topics) | ~370 |
