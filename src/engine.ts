@@ -19,25 +19,20 @@ import type {
   GraphStore,
   Post,
   RoundContext,
+  FeedItem,
   SimEvent,
 } from "./db.js";
 import type { SimConfig } from "./config.js";
 import type { CognitionBackend, DecisionResponse } from "./cognition.js";
 import { deriveActivationConfig, totalRounds, sanitizeForStorage } from "./config.js";
 import { computeActivation } from "./activation.js";
-import { buildFeed } from "./feed.js";
-import {
-  routeCognition,
-  applyTierCRules,
-  buildDecisionRequest,
-  buildSimContext,
-} from "./cognition.js";
 import { logAction, updateRound } from "./telemetry.js";
 import { SeedablePRNG, saveSnapshot } from "./reproducibility.js";
 import { stableId, uuid } from "./db.js";
 import { processEvents } from "./events.js";
 import { propagate } from "./propagation.js";
 import { updateFatigue } from "./fatigue.js";
+import { scheduleRoundActions } from "./scheduler.js";
 
 // ═══════════════════════════════════════════════════════
 // TYPES
@@ -55,6 +50,14 @@ export interface EngineOptions {
   config: SimConfig;
   backend: CognitionBackend;
   runId?: string;
+}
+
+interface ExecutableActorAction {
+  actor: ActorRow;
+  actorTopics: string[];
+  routeTier: "A" | "B" | "C";
+  decision: DecisionResponse;
+  feed: FeedItem[];
 }
 
 // ═══════════════════════════════════════════════════════
@@ -196,108 +199,89 @@ export async function runSimulation(opts: EngineOptions): Promise<EngineResult> 
         updatedNarratives
       );
 
-      // Per-actor processing
+      // Stage actor decisions deterministically, then resolve Tier A/B with bounded concurrency.
+      const scheduledActions = await scheduleRoundActions({
+        activeActors,
+        store,
+        runId,
+        roundNum,
+        state,
+        config,
+        backend,
+        rng,
+        activeEvents,
+        actorTopicsMap,
+        actorBeliefsMap,
+      });
+
       let totalPosts = 0;
-      let totalActions = 0;
-      let tierACalls = 0;
-      let tierBCalls = 0;
-      let tierCActions = 0;
+      const totalActions = scheduledActions.length;
+      const tierACalls = scheduledActions.filter((a) => a.route.tier === "A").length;
+      const tierBCalls = scheduledActions.filter((a) => a.route.tier === "B").length;
+      const tierCActions = scheduledActions.filter((a) => a.route.tier === "C").length;
 
-      for (const actor of activeActors) {
-        // Build feed
-        const actorTopics = actorTopicsMap.get(actor.id) ?? [];
-        const feed = buildFeed(actor, state, config.feed, actorTopics);
+      store.executeInTransaction(() => {
+        for (const scheduled of scheduledActions) {
+          const executable: ExecutableActorAction = {
+            actor: scheduled.actor,
+            actorTopics: scheduled.actorTopics,
+            routeTier: scheduled.route.tier,
+            decision: scheduled.decision,
+            feed: scheduled.feed,
+          };
 
-        // Route cognition
-        const route = routeCognition(
-          actor,
-          feed,
-          config.cognition,
-          rng,
-          activeEvents,
-          actorTopics
-        );
-
-        // Decide
-        let decision: DecisionResponse;
-        if (route.tier === "C") {
-          decision = applyTierCRules(actor, feed, config.cognition, rng);
-          tierCActions++;
-        } else {
-          const beliefs = actorBeliefsMap.get(actor.id) ?? {};
-          const simContext = buildSimContext(
-            actor,
+          totalPosts += executeDecision(
             store,
             runId,
             roundNum,
-            config.cognition.interactionLookback
+            executable.actor,
+            executable.decision,
+            simTimestamp,
+            executable.actorTopics
           );
-          const request = buildDecisionRequest(
-            actor,
-            feed,
-            beliefs,
-            actorTopics,
-            simContext,
-            roundNum
-          );
-          decision = await backend.decide(request);
 
-          if (route.tier === "A") tierACalls++;
-          else tierBCalls++;
+          logAction(
+            store,
+            runId,
+            roundNum,
+            executable.actor.id,
+            executable.routeTier,
+            executable.decision.action,
+            JSON.stringify({
+              ...executable.decision,
+              feedSize: executable.feed.length,
+            })
+          );
         }
 
-        // Execute decision
-        const postsCreated = executeDecision(
-          store,
+        // ── Phase 6: Propagation (AFTER execute) ──
+        // Intentional one-round latency: propagation uses `state` built at the
+        // start of this round, so it spreads posts from PREVIOUS rounds.
+        // Posts created in the current round (including event posts) will be
+        // propagated next round. A post cannot spread the instant it's created.
+        const propagationResult = propagate(state, config.propagation, roundNum, rng);
+        for (const [postId, delta] of propagationResult.reachDeltas) {
+          store.updatePostEngagement(postId, "reach", delta);
+        }
+        for (const exposure of propagationResult.newExposures) {
+          store.addExposure(exposure);
+        }
+
+        // Update round aggregates
+        const roundWallTimeMs = Date.now() - roundT0;
+        updateRound(store, {
+          num: roundNum,
           runId,
-          roundNum,
-          actor,
-          decision,
-          simTimestamp,
-          actorTopics
-        );
-        totalPosts += postsCreated;
-        totalActions++;
-
-        // Log telemetry
-        logAction(
-          store,
-          runId,
-          roundNum,
-          actor.id,
-          route.tier,
-          decision.action,
-          JSON.stringify(decision)
-        );
-      }
-
-      // ── Phase 6: Propagation (AFTER execute) ──
-      // Intentional one-round latency: propagation uses `state` built at the
-      // start of this round, so it spreads posts from PREVIOUS rounds.
-      // Posts created in the current round (including event posts) will be
-      // propagated next round. A post cannot spread the instant it's created.
-      const propagationResult = propagate(state, config.propagation, roundNum, rng);
-      for (const [postId, delta] of propagationResult.reachDeltas) {
-        store.updatePostEngagement(postId, "reach", delta);
-      }
-      for (const exposure of propagationResult.newExposures) {
-        store.addExposure(exposure);
-      }
-
-      // Update round aggregates
-      const roundWallTimeMs = Date.now() - roundT0;
-      updateRound(store, {
-        num: roundNum,
-        runId,
-        simTime: simTimestamp,
-        activeActors: activeActors.length,
-        totalPosts,
-        totalActions,
-        tierACalls,
-        tierBCalls,
-        tierCActions,
-        events: activeEvents,
-        wallTimeMs: roundWallTimeMs,
+          simTime: simTimestamp,
+          activeActors: activeActors.length,
+          totalPosts,
+          totalActions,
+          tierACalls,
+          tierBCalls,
+          tierCActions,
+          events: activeEvents,
+          wallTimeMs: roundWallTimeMs,
+        });
       });
 
       // Snapshot

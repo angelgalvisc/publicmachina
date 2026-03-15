@@ -260,6 +260,9 @@ export interface GraphStore {
   // Read-only SQL execution (shell.ts query boundary)
   executeReadOnlySql(sql: string): Array<Record<string, unknown>>;
 
+  // Transaction boundary for batched engine commits
+  executeInTransaction<T>(fn: () => T): T;
+
   // Utility
   close(): void;
 }
@@ -1508,6 +1511,10 @@ export class SQLiteGraphStore implements GraphStore {
       );
     }
     return this.db.prepare(sql).all() as Array<Record<string, unknown>>;
+  }
+
+  executeInTransaction<T>(fn: () => T): T {
+    return this.db.transaction(fn)();
   }
 
   // ─── Utility ───

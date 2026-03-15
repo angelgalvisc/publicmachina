@@ -13,7 +13,11 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { SQLiteGraphStore } from "../src/db.js";
 import type { ActorRow, Post } from "../src/db.js";
 import { MockCognitionBackend } from "../src/cognition.js";
-import type { DecisionResponse } from "../src/cognition.js";
+import type {
+  CognitionBackend,
+  DecisionRequest,
+  DecisionResponse,
+} from "../src/cognition.js";
 import { defaultConfig } from "../src/config.js";
 import type { SimConfig } from "../src/config.js";
 import { runSimulation } from "../src/engine.js";
@@ -114,6 +118,42 @@ beforeEach(() => {
 afterEach(() => {
   store.close();
 });
+
+class TrackingBackend implements CognitionBackend {
+  inflight = 0;
+  maxInflight = 0;
+
+  constructor(
+    private opts: {
+      delayMs?: number;
+      failActorId?: string;
+    } = {}
+  ) {}
+
+  async start(): Promise<void> {}
+  async shutdown(): Promise<void> {}
+
+  async decide(request: DecisionRequest): Promise<DecisionResponse> {
+    this.inflight++;
+    this.maxInflight = Math.max(this.maxInflight, this.inflight);
+    await new Promise((resolve) => setTimeout(resolve, this.opts.delayMs ?? 15));
+    this.inflight--;
+
+    if (this.opts.failActorId && request.actorId === this.opts.failActorId) {
+      throw new Error(`backend failure for ${request.actorId}`);
+    }
+
+    return {
+      action: "post",
+      content: `post from ${request.actorId}`,
+      reasoning: "tracking backend",
+    };
+  }
+
+  async interview(_actorContext: string, _question: string): Promise<string> {
+    return "tracking backend interview";
+  }
+}
 
 // ═══════════════════════════════════════════════════════
 // CORE LOOP
@@ -284,6 +324,66 @@ describe("runSimulation — determinism", () => {
 
     store1.close();
     store2.close();
+  });
+});
+
+// ═══════════════════════════════════════════════════════
+// SCHEDULER / BATCH COMMIT
+// ═══════════════════════════════════════════════════════
+
+describe("runSimulation — scheduler v2", () => {
+  it("respects simulation.concurrency for backend decisions", async () => {
+    const runId = "run-concurrency";
+    seedActors(runId, 4);
+    const trackingBackend = new TrackingBackend({ delayMs: 20 });
+    const cfg = makeTestConfig({ totalHours: 1, concurrency: 2 });
+    cfg.cognition.tierA.minInfluence = 1.1;
+    cfg.cognition.tierB.samplingRate = 1.0;
+
+    const result = await runSimulation({
+      store,
+      config: cfg,
+      backend: trackingBackend,
+      runId,
+    });
+
+    expect(result.status).toBe("completed");
+    expect(trackingBackend.maxInflight).toBe(2);
+  });
+
+  it("does not partially commit actor actions when backend resolution fails", async () => {
+    const runId = "run-batch-failure";
+    seedActors(runId, 3);
+    const trackingBackend = new TrackingBackend({
+      delayMs: 5,
+      failActorId: "actor-1",
+    });
+    const cfg = makeTestConfig({ totalHours: 1, concurrency: 2 });
+    cfg.cognition.tierA.minInfluence = 1.1;
+    cfg.cognition.tierB.samplingRate = 1.0;
+
+    const result = await runSimulation({
+      store,
+      config: cfg,
+      backend: trackingBackend,
+      runId,
+    });
+
+    expect(result.status).toBe("failed");
+
+    const postCount = (store as any).db
+      .prepare("SELECT COUNT(*) as c FROM posts WHERE run_id = ?")
+      .get(runId).c as number;
+    const telemetryCount = (store as any).db
+      .prepare("SELECT COUNT(*) as c FROM telemetry WHERE run_id = ?")
+      .get(runId).c as number;
+    const roundCount = (store as any).db
+      .prepare("SELECT COUNT(*) as c FROM rounds WHERE run_id = ?")
+      .get(runId).c as number;
+
+    expect(postCount).toBe(0);
+    expect(telemetryCount).toBe(0);
+    expect(roundCount).toBe(0);
   });
 });
 
