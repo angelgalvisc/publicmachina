@@ -1,5 +1,13 @@
 <div align="center">
 
+```
+   ◉     ◉     ◉     ◉     ◉     ◉     ◉
+   │     │     │     │     │     │     │
+  ╭┴╮   ╭┴╮   ╭┴╮   ╭┴╮   ╭┴╮   ╭┴╮   ╭┴╮
+ ⌐°‿°¬ ⌐°o°¬ ⌐·_·¬ ⌐>‿<¬ ⌐°‿°¬ ⌐°_°¬ ⌐ᵔ‿ᵔ¬
+  ╘═╛   ╘═╛   ╘═╛   ╘═╛   ╘═╛   ╘═╛   ╘═╛
+```
+
 # SeldonClaw
 
 **The first social simulation engine where agents search the real web before deciding what to say.**
