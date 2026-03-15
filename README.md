@@ -7,7 +7,7 @@
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg?style=flat-square)](LICENSE)
 [![Node](https://img.shields.io/badge/Node-%3E%3D18-339933?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.5+-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org)
-[![Tests](https://img.shields.io/badge/Tests-379_passing-brightgreen?style=flat-square)]()
+[![Tests](https://img.shields.io/badge/Tests-387_passing-brightgreen?style=flat-square)]()
 [![CKP](https://img.shields.io/badge/CKP-v0.2.6-orange?style=flat-square)](https://github.com/angelgalvisc/clawkernel)
 
 ---
@@ -27,6 +27,7 @@ Every action is stored in a single SQLite database: deterministic, replayable, a
 ### Key Capabilities
 
 - **Web-grounded decisions** — Tier A/B agents query real web sources via SearXNG before deciding, with temporal cutoff filtering and cache-first determinism. [See details below.](#web-grounded-search)
+- **Natural-language simulation design** — Turn a free-form brief into a validated `simulation.spec.json` plus deterministic `seldonclaw.config.yaml`
 - **Deterministic simulations** — Seedable PRNG (xoshiro128**) guarantees identical runs from the same seed
 - **3-tier cognition** — Tier A (always LLM), Tier B (probabilistic LLM), Tier C (rule-based) for cost-efficient agent decisions
 - **Knowledge graph foundation** — Ingest documents, extract claims, resolve entities, build ontologies, then generate actor profiles grounded in real data
@@ -199,6 +200,7 @@ Documents ──→ Ingest ──→ Knowledge Graph ──→ Ontology ──�
 | `memory.ts` | Deliberative actor memory derivation and persistence | ~160 |
 | `embeddings.ts` | Deterministic embedding provider, cache, and state enrichment | ~220 |
 | `search.ts` | SearXNG client, temporal cutoff filtering, cache-first web context | ~400 |
+| `design.ts` | Natural-language brief -> typed simulation spec -> rendered config | ~350 |
 | `profiles.ts` | LLM-powered actor generation from knowledge graph entities | ~250 |
 | `ontology.ts` | LLM-powered ontology extraction (entity types, edge types, topics) | ~200 |
 | `ingest.ts` | Document ingestion → chunks → claims (provenance chain) | ~200 |
@@ -262,6 +264,54 @@ cp .env.example .env
 The `init` command generates a `seldonclaw.config.yaml` with model selection, API key references (never raw secrets), and output directory configuration.
 The `doctor` command verifies your environment — including the SearXNG endpoint, if search is enabled.
 
+### Design a Simulation in Natural Language
+
+After basic setup, use `design` to convert a natural-language brief into:
+
+- `simulation.spec.json` — the semantic design record
+- `seldonclaw.generated.config.yaml` — the executable engine config
+
+```bash
+node dist/index.js design \
+  --docs ./docs/product-recall \
+  --brief "Create a 10-round simulation about a global consumer electronics product recall. Focus on journalists, company spokespeople, regulators, investors, and customers. Only journalists, analysts, and institutions may search the web. Allow up to 4 search-enabled actors per round, with 2 Tier A and 2 Tier B. Enable embedding-aware feed ranking." \
+  --out-spec simulation.spec.json \
+  --out-config seldonclaw.generated.config.yaml
+```
+
+The command does **not** run the simulation immediately. It follows a professional, auditable flow:
+
+1. Interpret the brief into a typed simulation spec
+2. Validate assumptions, warnings, and unsupported combinations
+3. Show a human-readable plan preview
+4. Write the spec JSON and generated YAML after confirmation
+
+Example preview:
+
+```text
+Simulation Plan
+- Title: Global Product Recall Response
+- Objective: Simulate how narratives and institutional responses evolve after a global consumer electronics recall.
+- Rounds: 10
+- Documents: ./docs/product-recall
+- Focus actors: company spokespeople, customers, investors, journalists, regulators
+- Hypothesis: Journalists and regulators accelerate negative sentiment faster than the company can stabilize the narrative.
+- Web search: enabled
+- Search policy: tiers A, B, up to 4 actors/round (A:2, B:2)
+- Search targeting: archetypes institution, professions analyst, journalist, actors none
+- Search cutoff: 2026-03-01
+- Embedding-aware feed: enabled (weight 0.35)
+```
+
+Once the plan looks right:
+
+```bash
+node dist/index.js run \
+  --config ./seldonclaw.generated.config.yaml \
+  --docs ./docs/product-recall \
+  --hypothesis "Journalists and regulators accelerate negative sentiment faster than the company can stabilize the narrative."
+```
+
 ### Run the Full Pipeline
 
 The CLI exposes both the end-to-end pipeline and the lower-level stages.
@@ -311,6 +361,7 @@ node dist/index.js import-agent --bundle ./exports --db other-sim.db --run new-r
 | Command | Description |
 |---------|-------------|
 | `simulate` | Run a simulation (supports `--mock` for testing) |
+| `design` | Convert a natural-language brief into a validated spec + generated config |
 | `run` | Full pipeline: ingest → analyze → generate → simulate |
 | `ingest` | Ingest source documents into the provenance store |
 | `analyze` | Extract ontology + claims and build the knowledge graph |
@@ -405,7 +456,7 @@ npx tsc --noEmit
 
 ### Test Suite
 
-379 tests across 25 test files covering:
+387 tests across 26 test files covering:
 
 - Knowledge graph pipeline (ingest → claims → entities → resolution)
 - Ontology extraction and entity typing
@@ -415,6 +466,7 @@ npx tsc --noEmit
 - Persisted agent memory and memory-aware cognition context
 - Optional embedding-aware feed ranking with deterministic cache
 - **Web-grounded search** (SearXNG client, cache-first resolution, temporal cutoff filtering, query building, search audit trail)
+- **Natural-language design** (brief interpretation, typed validation, deterministic config rendering, CLI file generation)
 - Deterministic reproducibility (seed → identical runs)
 - CKP export/import with secret scrubbing
 - Report generation (metrics + narrative)
@@ -442,6 +494,7 @@ seldonclaw/
 │   ├── memory.ts         # Persisted actor memories
 │   ├── embeddings.ts     # Embedding cache + semantic features
 │   ├── search.ts         # SearXNG-backed web grounding
+│   ├── design.ts         # Natural-language simulation design
 │   ├── profiles.ts       # LLM actor generation
 │   ├── ontology.ts       # LLM ontology extraction
 │   ├── ingest.ts         # Document → claims pipeline
@@ -456,7 +509,7 @@ seldonclaw/
 │   ├── reproducibility.ts # Seedable PRNG
 │   ├── types.ts          # Domain types
 │   └── ids.ts            # ID generation
-├── tests/                # 25 test files, 379 tests
+├── tests/                # 26 test files, 387 tests
 ├── package.json
 ├── tsconfig.json
 ├── .env.example

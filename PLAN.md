@@ -100,6 +100,7 @@ seldonclaw/
 │   ├── store.ts              # GraphStore interface + SQLiteGraphStore
 │   ├── ids.ts                # uuid() + stableId() helpers
 │   ├── config.ts             # Config loader (seldonclaw.config.yaml) + sanitizeForStorage()
+│   ├── design.ts             # Natural-language brief → SimulationSpec → rendered config
 │   ├── llm.ts                # Multi-provider LLM client (Anthropic native + OpenAI compat)
 │   ├── ingest.ts             # Document parsing (MD/TXT, optional PDF)
 │   ├── ontology.ts           # LLM (native SDK) → entity types + edge types
@@ -1593,6 +1594,7 @@ seldonclaw replay --db simulation.db --run <run-id> --to-round 30 # replay up to
 
 # Utilities
 seldonclaw init                                              # conversational setup wizard
+seldonclaw design --brief "..." --out-spec simulation.spec.json --out-config seldonclaw.generated.config.yaml
 seldonclaw doctor                                            # validate install, config, provider, DB access
 seldonclaw config show                                       # print sanitized current config
 seldonclaw config set output.dir ./output                    # update a config field
@@ -2063,6 +2065,115 @@ Two post-MVP extensions were added after the core engine stabilized. They were i
 - `src/scheduler.ts`
 - `src/engine.ts`
 - `src/index.ts`
+
+## V6 Extension — Natural-Language Simulation Design
+
+**Problem:** a powerful simulation engine still forces users to translate intent into low-level YAML by hand. That creates three failure modes:
+
+1. the user's actual scenario is underspecified or misconfigured
+2. defaults remain implicit and hard to audit
+3. a chat-first UX can become non-reproducible if the LLM writes executable config directly
+
+**Solution:** insert a design layer between free-form intent and execution:
+
+```
+natural-language brief
+        ↓
+typed SimulationSpec
+        ↓
+validation + assumptions + warnings
+        ↓
+deterministic SimConfig rendering
+        ↓
+generated YAML + JSON spec
+        ↓
+confirmation
+        ↓
+run
+```
+
+The LLM interprets intent. TypeScript remains the source of truth for validation, defaults, and final config rendering.
+
+### Goals
+
+- let users describe a simulation in plain English after basic setup
+- preserve auditability and replayability
+- surface assumptions before anything is executed
+- generate stable artifacts:
+  - `simulation.spec.json`
+  - `seldonclaw.generated.config.yaml`
+
+### Recommended user flow
+
+```bash
+seldonclaw init
+seldonclaw design \
+  --docs ./docs/product-recall \
+  --brief "Create a 10-round simulation about a global consumer electronics product recall. Focus on journalists, company spokespeople, regulators, investors, and customers. Only journalists, analysts, and institutions may search the web. Allow up to 4 search-enabled actors per round, with 2 Tier A and 2 Tier B. Enable embedding-aware feed ranking."
+seldonclaw run \
+  --config ./seldonclaw.generated.config.yaml \
+  --docs ./docs/product-recall \
+  --hypothesis "Journalists and regulators accelerate negative sentiment faster than the company can stabilize the narrative."
+```
+
+### Core contract
+
+- free-form text never executes directly
+- the LLM never writes raw YAML as the source of truth
+- `SimulationSpec` is the semantic layer
+- `SimConfig` is the execution layer
+- every generated config is reviewable before writing
+
+### Tasks
+
+1. Introduce `src/design.ts`
+   - `SimulationSpec`
+   - `interpretSimulationBrief()`
+   - `validateSimulationSpec()`
+   - `renderSimulationConfig()`
+   - `renderSimulationConfigYaml()`
+   - `formatSimulationPlan()`
+2. Add `seldonclaw design`
+   - `--brief`
+   - `--docs`
+   - `--out-spec`
+   - `--out-config`
+   - `--yes`
+   - `--mock`
+3. Make the flow explicit:
+   - interpret brief
+   - validate
+   - preview
+   - confirm
+   - write files
+4. Keep the brief examples global and domain-generic
+   - product recall
+   - cloud outage
+   - AI regulation debate
+   - labor strike
+5. Document the feature in `README.md`
+   - setup
+   - example brief
+   - generated artifacts
+   - why the flow is safe
+
+### Dependency chain
+
+- first: `design.ts`
+- then: `index.ts` command wiring
+- then: tests for parser/render/CLI
+- finally: `README.md` and usage docs
+
+### Verification
+
+1. `seldonclaw design --brief "..." --docs ./docs/example --mock --yes`
+2. inspect generated `simulation.spec.json`
+3. inspect generated `seldonclaw.generated.config.yaml`
+4. `seldonclaw run --config ./seldonclaw.generated.config.yaml --docs ./docs/example --mock`
+5. confirm:
+   - identical brief + identical defaults -> equivalent rendered config
+   - warnings are surfaced when docs path is missing
+   - unsupported values do not reach the engine unchecked
 
 ## Verification
 

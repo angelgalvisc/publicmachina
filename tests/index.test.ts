@@ -437,6 +437,54 @@ describe("CLI init", () => {
   });
 });
 
+describe("CLI design", () => {
+  it("writes a simulation spec and generated config from a global brief", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "seldonclaw-design-"));
+    tempDirs.push(dir);
+    const configPath = join(dir, "designed.config.yaml");
+    const specPath = join(dir, "simulation.spec.json");
+    const capture = makeIO();
+
+    await runCli(
+      [
+        "node",
+        "seldonclaw",
+        "design",
+        "--brief",
+        "Create a 10-round simulation about a global consumer electronics recall. Only journalists, analysts, and institutions may search the web. Allow up to 4 search-enabled actors per round. Enable embedding-aware feed ranking.",
+        "--docs",
+        "./docs/product-recall",
+        "--out-config",
+        configPath,
+        "--out-spec",
+        specPath,
+        "--mock",
+        "--yes",
+      ],
+      capture.io
+    );
+
+    const configContents = readFileSync(configPath, "utf-8");
+    const specContents = JSON.parse(readFileSync(specPath, "utf-8")) as {
+      title: string;
+      docsPath: string;
+      search: { enabled: boolean; maxActorsPerRound: number };
+      feed: { embeddingEnabled: boolean };
+    };
+
+    expect(capture.getStdout()).toContain("Simulation Plan");
+    expect(capture.getStdout()).toContain(`Wrote ${specPath}`);
+    expect(capture.getStdout()).toContain(`Wrote ${configPath}`);
+    expect(configContents).toContain("search:");
+    expect(configContents).toContain("embeddingEnabled: true");
+    expect(specContents.title).toBe("Global Product Recall Response");
+    expect(specContents.docsPath).toBe("./docs/product-recall");
+    expect(specContents.search.enabled).toBe(true);
+    expect(specContents.search.maxActorsPerRound).toBe(4);
+    expect(specContents.feed.embeddingEnabled).toBe(true);
+  });
+});
+
 describe("CLI doctor", () => {
   it("checks search health when search is enabled", async () => {
     process.env.TEST_PROVIDER_KEY = "set";

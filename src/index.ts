@@ -5,6 +5,7 @@
  * Source of truth: PLAN.md §CLI, CLAUDE.md Phase 5.2
  *
  * Commander-based CLI with subcommands:
+ *   design — natural-language simulation planning -> spec + config
  *   run/ingest/analyze/generate/simulate — pipeline + simulation entry points
  *   stats/report/interview/export/import/shell — analysis and operator tools
  *   resume/replay — planned follow-ups (still stubbed)
@@ -27,6 +28,7 @@ import { ingestDirectory } from "./ingest.js";
 import { extractOntology } from "./ontology.js";
 import { buildKnowledgeGraph } from "./graph.js";
 import { generateProfiles } from "./profiles.js";
+import { designSimulationFromBrief } from "./design.js";
 import { checkSearchHealth, createSearchProvider } from "./search.js";
 import type { RunManifest } from "./db.js";
 import { existsSync, writeFileSync } from "node:fs";
@@ -64,11 +66,56 @@ function getConfig(configPath?: string): SimConfig {
   return configPath ? loadConfig(configPath) : defaultConfig();
 }
 
-function createCliLlm(config: SimConfig, options: { mock?: boolean; feature?: "report" | "shell" } = {}): LLMClient {
+function createCliLlm(
+  config: SimConfig,
+  options: { mock?: boolean; feature?: "report" | "shell" | "design" } = {}
+): LLMClient {
   if (options.mock) {
     const llm = new MockLLMClient();
     if (options.feature === "report") {
       llm.setResponse("Rounds completed:", "Mock report narrative");
+    }
+    if (options.feature === "design") {
+      llm.setResponse(
+        "Interpret the following simulation brief",
+        JSON.stringify({
+          title: "Global Product Recall Response",
+          objective:
+            "Simulate how narratives and institutional responses evolve after a global consumer electronics recall.",
+          hypothesis:
+            "Journalists and regulators accelerate negative sentiment faster than the company can stabilize the narrative.",
+          docsPath: null,
+          rounds: 10,
+          focusActors: ["customers", "journalists", "regulators", "company spokespeople", "investors"],
+          search: {
+            enabled: true,
+            enabledTiers: ["A", "B"],
+            maxActorsPerRound: 4,
+            maxActorsByTier: { A: 2, B: 2 },
+            allowArchetypes: ["institution"],
+            denyArchetypes: [],
+            allowProfessions: ["journalist", "analyst"],
+            denyProfessions: [],
+            allowActors: [],
+            denyActors: [],
+            cutoffDate: "2026-03-01",
+            categories: "news",
+            defaultLanguage: "auto",
+            maxResultsPerQuery: 5,
+            maxQueriesPerActor: 2,
+            strictCutoff: true,
+            timeoutMs: 3000,
+          },
+          feed: {
+            embeddingEnabled: true,
+            embeddingWeight: 0.35,
+          },
+          assumptions: [
+            "Assumed the platform remains X/Twitter-style because multi-platform simulation is not yet configurable.",
+          ],
+          warnings: [],
+        })
+      );
     }
     return llm;
   }
@@ -343,6 +390,98 @@ function parseBooleanAnswer(value: string): boolean {
   return /^(y|yes|true|1)$/i.test(value.trim());
 }
 
+async function runDesignCommand(
+  opts: {
+    brief?: string;
+    docs?: string;
+    config?: string;
+    outConfig: string;
+    outSpec: string;
+    yes?: boolean;
+    mock?: boolean;
+  },
+  io: CliIO,
+  promptSession?: PromptSession
+): Promise<void> {
+  const config = getConfig(opts.config);
+  let prompt = promptSession;
+  const interactive = !opts.yes && (Boolean(promptSession) || process.stdin.isTTY);
+  let createdPrompt = false;
+
+  if (!prompt && interactive) {
+    prompt = createPromptSession();
+    createdPrompt = true;
+  }
+
+  try {
+    let brief = opts.brief?.trim() ?? "";
+    if (!brief) {
+      if (!prompt) {
+        throw new Error('Natural-language brief required. Pass --brief or run "seldonclaw design" interactively.');
+      }
+      brief = await prompt.ask("Describe the simulation you want to design");
+    }
+
+    const llm = createCliLlm(config, { mock: opts.mock, feature: "design" });
+    const result = await designSimulationFromBrief(llm, brief, {
+      docsPath: opts.docs,
+      baseConfig: config,
+    });
+
+    io.stdout(result.preview);
+
+    const outputsExist = existsSync(opts.outConfig) || existsSync(opts.outSpec);
+    if (outputsExist && !opts.yes) {
+      if (!prompt) {
+        throw new Error(
+          `Output already exists. Remove ${opts.outConfig} / ${opts.outSpec} or rerun with --yes to overwrite.`
+        );
+      }
+      const overwrite = await prompt.ask(
+        "Output files already exist. Overwrite them? (yes/no)",
+        "no"
+      );
+      if (!parseBooleanAnswer(overwrite)) {
+        io.stdout("Aborted before writing output files.\n");
+        return;
+      }
+    }
+
+    if (!opts.yes) {
+      if (!prompt) {
+        throw new Error("Design confirmation requires interactive mode or --yes.");
+      }
+      const confirm = await prompt.ask("Write the generated spec and config? (yes/no)", "yes");
+      if (!parseBooleanAnswer(confirm)) {
+        io.stdout("Aborted before writing output files.\n");
+        return;
+      }
+    }
+
+    writeFileSync(opts.outSpec, `${JSON.stringify(result.spec, null, 2)}\n`, "utf-8");
+    writeFileSync(opts.outConfig, result.yaml, "utf-8");
+
+    io.stdout(`Wrote ${opts.outSpec}\n`);
+    io.stdout(`Wrote ${opts.outConfig}\n`);
+
+    const nextParts = [
+      "node dist/index.js run",
+      `--config ${JSON.stringify(opts.outConfig)}`,
+    ];
+    if (result.spec.docsPath) {
+      nextParts.push(`--docs ${JSON.stringify(result.spec.docsPath)}`);
+    }
+    if (result.spec.hypothesis) {
+      nextParts.push(`--hypothesis ${JSON.stringify(result.spec.hypothesis)}`);
+    }
+    io.stdout(`Next: ${nextParts.join(" ")}\n`);
+  } finally {
+    if (prompt && createdPrompt) {
+      prompt.close();
+    }
+  }
+}
+
 async function runSimulateCommand(
   opts: {
     db: string;
@@ -614,6 +753,31 @@ function runInspectCommand(
   }
 }
 
+// ═══════════════════════════════════════════════════════
+// BANNER
+// ═══════════════════════════════════════════════════════
+
+function printBanner(io: CliIO): void {
+  const isTTY = process.stdout.isTTY;
+  const O = isTTY ? "\x1b[33m" : "";   // orange (claws + antenna)
+  const W = isTTY ? "\x1b[97m" : "";   // white  (faces)
+  const C = isTTY ? "\x1b[36m" : "";   // cyan   (title)
+  const D = isTTY ? "\x1b[2m" : "";    // dim    (subtitle + version)
+  const B = isTTY ? "\x1b[1m" : "";    // bold
+  const R = isTTY ? "\x1b[0m" : "";    // reset
+
+  io.stdout("\n");
+  io.stdout(`   ${O}◉     ◉     ◉     ◉     ◉     ◉     ◉${R}\n`);
+  io.stdout(`   ${O}│     │     │     │     │     │     │${R}\n`);
+  io.stdout(`  ${O}╭┴╮   ╭┴╮   ╭┴╮   ╭┴╮   ╭┴╮   ╭┴╮   ╭┴╮${R}\n`);
+  io.stdout(` ${O}⌐${W}°‿°${O}¬ ⌐${W}°o°${O}¬ ⌐${W}·_·${O}¬ ⌐${W}>‿<${O}¬ ⌐${W}°‿°${O}¬ ⌐${W}°_°${O}¬ ⌐${W}ᵔ‿ᵔ${O}¬${R}\n`);
+  io.stdout(`  ${O}╘═╛   ╘═╛   ╘═╛   ╘═╛   ╘═╛   ╘═╛   ╘═╛${R}\n`);
+  io.stdout("\n");
+  io.stdout(`         ${B}${C}S E L D O N C L A W${R}  ${D}v0.1.0${R}\n`);
+  io.stdout(`   ${D}social simulation · web-grounded cognition${R}\n`);
+  io.stdout("\n");
+}
+
 export function createProgram(io: CliIO = defaultIO): Command {
   const program = new Command()
     .name("seldonclaw")
@@ -622,11 +786,35 @@ export function createProgram(io: CliIO = defaultIO): Command {
     .configureOutput({
       writeOut: (text) => io.stdout(text),
       writeErr: (text) => io.stderr(text),
+    })
+    .hook("preAction", () => {
+      printBanner(io);
     });
 
   // ═══════════════════════════════════════════════════════
   // SIMULATE
   // ═══════════════════════════════════════════════════════
+
+  program
+    .command("design")
+    .description("Design a simulation from a natural-language brief")
+    .option("--brief <text>", "natural-language simulation brief")
+    .option("--docs <dir>", "documents directory to bind into the generated spec")
+    .option("--config <path>", "base config YAML file")
+    .option("--out-config <path>", "generated config output path", "seldonclaw.generated.config.yaml")
+    .option("--out-spec <path>", "generated simulation spec path", "simulation.spec.json")
+    .option("--mock", "use MockLLMClient for brief interpretation")
+    .option("--yes", "write files without confirmation")
+    .action(async (opts) => {
+      await runDesignCommand(
+        {
+          ...opts,
+          outConfig: opts.outConfig,
+          outSpec: opts.outSpec,
+        },
+        io
+      );
+    });
 
   program
     .command("run")
