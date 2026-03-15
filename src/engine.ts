@@ -33,7 +33,7 @@ import {
   buildSimContext,
 } from "./cognition.js";
 import { logAction, updateRound } from "./telemetry.js";
-import { SeedablePRNG } from "./reproducibility.js";
+import { SeedablePRNG, saveSnapshot } from "./reproducibility.js";
 import { stableId, uuid } from "./db.js";
 
 // ═══════════════════════════════════════════════════════
@@ -232,14 +232,24 @@ export async function runSimulation(opts: EngineOptions): Promise<EngineResult> 
         roundNum > 0 &&
         roundNum % config.simulation.snapshotEvery === 0
       ) {
-        store.saveSnapshot({
-          id: stableId("snapshot", runId, String(roundNum)),
-          run_id: runId,
-          round_num: roundNum,
-          actor_states: "[]",
-          narrative_states: "[]",
-          rng_state: rng.state(),
-        });
+        const actorStates = store.getActorsByRun(runId).map((actor) => ({
+          id: actor.id,
+          stance: actor.stance,
+          sentiment_bias: actor.sentiment_bias,
+          activity_level: actor.activity_level,
+          influence_weight: actor.influence_weight,
+          follower_count: actor.follower_count,
+          following_count: actor.following_count,
+        }));
+        const narrativeStates = store.getNarrativesByRun(runId).map((narrative) => ({
+          topic: narrative.topic,
+          currentIntensity: narrative.current_intensity,
+          totalPosts: narrative.total_posts,
+          dominantSentiment: narrative.dominant_sentiment,
+          peakRound: narrative.peak_round,
+        }));
+
+        saveSnapshot(store, runId, roundNum, actorStates, narrativeStates, rng);
       }
     }
 

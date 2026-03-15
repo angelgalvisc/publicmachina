@@ -878,6 +878,18 @@ export interface GraphStore {
   createRun(manifest: RunManifest): string;
   updateRun(id: string, updates: Partial<RunManifest>): void;
   getRun(id: string): RunManifest | null;
+  getLatestRunId(): string | null;
+  getRunRoundSummary(runId: string): {
+    roundsCompleted: number;
+    totalPosts: number;
+    totalActions: number;
+    avgActiveActors: number;
+  };
+  getRunTierCallTotals(runId: string): {
+    tierACalls: number;
+    tierBCalls: number;
+    tierCActions: number;
+  };
 
   // Decision cache
   cacheDecision(entry: {
@@ -1778,6 +1790,58 @@ export class SQLiteGraphStore implements GraphStore {
         .prepare(`SELECT * FROM run_manifest WHERE id = ?`)
         .get(id) as RunManifest | undefined) ?? null
     );
+  }
+
+  getLatestRunId(): string | null {
+    const row = this.db
+      .prepare(`SELECT id FROM run_manifest ORDER BY started_at DESC LIMIT 1`)
+      .get() as { id: string } | undefined;
+    return row?.id ?? null;
+  }
+
+  getRunRoundSummary(runId: string): {
+    roundsCompleted: number;
+    totalPosts: number;
+    totalActions: number;
+    avgActiveActors: number;
+  } {
+    const row = this.db
+      .prepare(
+        `SELECT COUNT(*) as roundsCompleted,
+                COALESCE(SUM(total_posts), 0) as totalPosts,
+                COALESCE(SUM(total_actions), 0) as totalActions,
+                COALESCE(AVG(active_actors), 0) as avgActiveActors
+         FROM rounds WHERE run_id = ?`
+      )
+      .get(runId) as {
+        roundsCompleted: number;
+        totalPosts: number;
+        totalActions: number;
+        avgActiveActors: number;
+      };
+
+    return row;
+  }
+
+  getRunTierCallTotals(runId: string): {
+    tierACalls: number;
+    tierBCalls: number;
+    tierCActions: number;
+  } {
+    const row = this.db
+      .prepare(
+        `SELECT COALESCE(SUM(tier_a_calls), 0) as tierACalls,
+                COALESCE(SUM(tier_b_calls), 0) as tierBCalls,
+                COALESCE(SUM(tier_c_actions), 0) as tierCActions
+         FROM rounds WHERE run_id = ?`
+      )
+      .get(runId) as {
+        tierACalls: number;
+        tierBCalls: number;
+        tierCActions: number;
+      };
+
+    return row;
   }
 
   // ─── Decision cache ───

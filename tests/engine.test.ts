@@ -482,12 +482,21 @@ describe("runSimulation — snapshots", () => {
 
     const snapshots = (store as any).db
       .prepare("SELECT * FROM snapshots WHERE run_id = ? ORDER BY round_num ASC")
-      .all(runId) as Array<{ round_num: number; rng_state: string }>;
+      .all(runId) as Array<{
+      round_num: number;
+      rng_state: string;
+      actor_states: string;
+      narrative_states: string;
+    }>;
     // 5 rounds (0-4), snapshot at 2, 4
     expect(snapshots.length).toBe(2);
     expect(snapshots[0].round_num).toBe(2);
     expect(snapshots[1].round_num).toBe(4);
     expect(snapshots[0].rng_state).toBeTruthy();
+    expect(snapshots[0].actor_states).not.toBe("[]");
+    const actorStates = JSON.parse(snapshots[0].actor_states) as Record<string, unknown>;
+    expect(Object.keys(actorStates).length).toBeGreaterThan(0);
+    expect(snapshots[0].narrative_states).toBe("[]");
   });
 
   it("no snapshots when snapshotEvery is 0", async () => {
