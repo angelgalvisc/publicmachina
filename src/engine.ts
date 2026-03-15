@@ -296,6 +296,7 @@ export async function runSimulation(opts: EngineOptions): Promise<EngineResult> 
         tierACalls,
         tierBCalls,
         tierCActions,
+        events: activeEvents,
         wallTimeMs: roundWallTimeMs,
       });
 

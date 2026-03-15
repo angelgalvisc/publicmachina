@@ -7,13 +7,13 @@
  * - error path when no runs exist
  */
 
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
 import { SQLiteGraphStore } from "../src/db.js";
 import type { ActorRow } from "../src/db.js";
-import { runCli } from "../src/index.js";
+import { runCli, runInitCommand } from "../src/index.js";
 import { updateRound } from "../src/telemetry.js";
 
 const tempDirs: string[] = [];
@@ -189,5 +189,84 @@ describe("CLI stats", () => {
     await expect(
       runCli(["node", "seldonclaw", "stats", "--db", dbPath], capture.io)
     ).rejects.toThrow("No runs found in database.");
+  });
+});
+
+describe("CLI report", () => {
+  it("prints metrics and mock narrative", async () => {
+    const dbPath = makeTempDbPath();
+    const store = new SQLiteGraphStore(dbPath);
+    store.createRun({
+      id: "run-1",
+      started_at: "2024-01-01T00:00:00",
+      seed: 42,
+      config_snapshot: "{}",
+      hypothesis: "Test hypothesis",
+      graph_revision_id: "rev-1",
+      status: "completed",
+      total_rounds: 1,
+      finished_at: "2024-01-01T01:00:00",
+    });
+    store.addActor(makeActor({ id: "actor-a", run_id: "run-1", handle: "@a" }));
+    store.addPost({
+      id: "post-1",
+      run_id: "run-1",
+      author_id: "actor-a",
+      content: "Test post",
+      round_num: 0,
+      sim_timestamp: "2024-01-01T00:00:00",
+      likes: 5,
+      reposts: 1,
+      comments: 0,
+      reach: 20,
+      sentiment: 0.2,
+    });
+    store.upsertRound({
+      num: 0,
+      run_id: "run-1",
+      active_actors: 1,
+      total_posts: 1,
+      total_actions: 1,
+      events: JSON.stringify([{ type: "scheduled", content: "Event", topics: ["education"] }]),
+    });
+    store.close();
+
+    const capture = makeIO();
+    await runCli(
+      ["node", "seldonclaw", "report", "--db", dbPath, "--run", "run-1", "--mock"],
+      capture.io
+    );
+
+    const output = capture.getStdout();
+    expect(output).toContain("Report for run run-1");
+    expect(output).toContain("Hypothesis: Test hypothesis");
+    expect(output).toContain("Mock report narrative");
+  });
+});
+
+describe("CLI init", () => {
+  it("writes a guided config without storing secrets", async () => {
+    const configPath = join(makeTempDbPath().replace("simulation.db", ""), "seldonclaw.config.yaml");
+    const capture = makeIO();
+
+    await runInitCommand(
+      { output: configPath },
+      capture.io,
+      {
+        ask: async (question, defaultValue) => {
+          if (question.includes("Simulation model")) return "claude-haiku-4-20250414";
+          if (question.includes("Report model")) return "claude-sonnet-4-20250514";
+          if (question.includes("API key env var")) return "CUSTOM_API_KEY";
+          if (question.includes("Output directory")) return "./reports";
+          return defaultValue ?? "";
+        },
+        close: () => {},
+      }
+    );
+
+    const contents = readFileSync(configPath, "utf-8");
+    expect(contents).toContain('apiKeyEnv: "CUSTOM_API_KEY"');
+    expect(contents).toContain('dir: "./reports"');
+    expect(contents).not.toContain("sk-");
   });
 });

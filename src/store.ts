@@ -237,6 +237,29 @@ export interface GraphStore {
   getEdgeTypes(): EdgeType[];
   getAllActiveEntities(): Entity[];
 
+  // Report queries
+  getPostsPerRound(runId: string): Array<{
+    round: number;
+    posts: number;
+    comments: number;
+    reposts: number;
+  }>;
+  getTopActorsByReach(
+    runId: string,
+    limit?: number
+  ): Array<{
+    actor_id: string;
+    actor_name: string;
+    total_reach: number;
+    total_likes: number;
+    total_posts: number;
+    cognition_tier: string;
+  }>;
+  getEventRounds(runId: string): number[];
+
+  // Read-only SQL execution (shell.ts query boundary)
+  executeReadOnlySql(sql: string): Array<Record<string, unknown>>;
+
   // Utility
   close(): void;
 }
@@ -1409,6 +1432,82 @@ export class SQLiteGraphStore implements GraphStore {
     return this.db
       .prepare(`SELECT * FROM entities WHERE merged_into IS NULL ORDER BY id`)
       .all() as Entity[];
+  }
+
+  // ─── Report queries ───
+
+  getPostsPerRound(runId: string): Array<{
+    round: number;
+    posts: number;
+    comments: number;
+    reposts: number;
+  }> {
+    return this.db
+      .prepare(
+        `SELECT round_num as round,
+                SUM(CASE WHEN reply_to IS NULL AND quote_of IS NULL THEN 1 ELSE 0 END) as posts,
+                SUM(CASE WHEN reply_to IS NOT NULL THEN 1 ELSE 0 END) as comments,
+                SUM(CASE WHEN quote_of IS NOT NULL THEN 1 ELSE 0 END) as reposts
+         FROM posts WHERE run_id = ? GROUP BY round_num ORDER BY round_num`
+      )
+      .all(runId) as Array<{
+        round: number;
+        posts: number;
+        comments: number;
+        reposts: number;
+      }>;
+  }
+
+  getTopActorsByReach(
+    runId: string,
+    limit: number = 10
+  ): Array<{
+    actor_id: string;
+    actor_name: string;
+    total_reach: number;
+    total_likes: number;
+    total_posts: number;
+    cognition_tier: string;
+  }> {
+    return this.db
+      .prepare(
+        `SELECT p.author_id as actor_id, a.name as actor_name, a.cognition_tier,
+                SUM(p.reach) as total_reach, SUM(p.likes) as total_likes, COUNT(*) as total_posts
+         FROM posts p JOIN actors a ON a.id = p.author_id
+         WHERE p.run_id = ? GROUP BY p.author_id ORDER BY total_reach DESC LIMIT ?`
+      )
+      .all(runId, limit) as Array<{
+        actor_id: string;
+        actor_name: string;
+        total_reach: number;
+        total_likes: number;
+        total_posts: number;
+        cognition_tier: string;
+      }>;
+  }
+
+  getEventRounds(runId: string): number[] {
+    const rows = this.db
+      .prepare(
+        `SELECT num
+         FROM rounds
+         WHERE run_id = ?
+           AND events IS NOT NULL
+           AND events != '[]'
+         ORDER BY num`
+      )
+      .all(runId) as Array<{ num: number }>;
+    return rows.map((r) => r.num);
+  }
+
+  executeReadOnlySql(sql: string): Array<Record<string, unknown>> {
+    if (!/^\s*SELECT\b/i.test(sql)) {
+      throw new Error(
+        "Only SELECT queries are allowed. Received: " +
+          sql.trim().split(/\s+/).slice(0, 3).join(" ")
+      );
+    }
+    return this.db.prepare(sql).all() as Array<Record<string, unknown>>;
   }
 
   // ─── Utility ───
