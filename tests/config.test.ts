@@ -223,6 +223,21 @@ simulation:
       }).toThrow(ConfigError);
     });
 
+    it("allows empty search tiers when search is disabled", () => {
+      const config = parseConfig(`
+search:
+  enabled: false
+  enabledTiers: []
+  maxActorsPerRound: 0
+  maxActorsByTier:
+    A: 0
+    B: 0
+`);
+
+      expect(config.search.enabled).toBe(false);
+      expect(config.search.enabledTiers).toEqual([]);
+    });
+
     it("rejects probability > 1", () => {
       expect(() => {
         parseConfig(`

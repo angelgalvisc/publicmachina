@@ -93,6 +93,26 @@ interface DesignOptions {
 }
 
 const SUPPORTED_ARCHETYPES = new Set(["persona", "organization", "media", "institution"]);
+const STRUCTURED_BRIEF_LABELS = new Set([
+  "título",
+  "titulo",
+  "objetivo",
+  "fuente principal",
+  "contexto documental",
+  "fecha focal",
+  "tipo de simulación",
+  "tipo de simulacion",
+  "evento inicial",
+  "regla crítica",
+  "regla critica",
+  "actores clave",
+  "configuración",
+  "configuracion",
+  "quiero observar",
+  "quiero como salida",
+  "alcance",
+  "horizonte temporal",
+]);
 
 export class DesignValidationError extends Error {
   constructor(public readonly issues: DesignValidationIssue[]) {
@@ -297,6 +317,116 @@ function normalizeSimulationSpec(
   };
 }
 
+function parseStructuredSimulationBrief(
+  brief: string,
+  options: DesignOptions = {}
+): SimulationSpecDraft | null {
+  const sections = parseLabeledSections(brief);
+  const signals = [
+    sections.get("título") ?? sections.get("titulo"),
+    sections.get("objetivo"),
+    sections.get("evento inicial"),
+    sections.get("actores clave"),
+    sections.get("configuración") ?? sections.get("configuracion"),
+  ].filter(Boolean);
+
+  if (signals.length < 3) return null;
+
+  const baseConfig = options.baseConfig ?? defaultConfig();
+  const title = cleanStructuredValue(firstLine(sections.get("título") ?? sections.get("titulo")));
+  const objective = cleanStructuredValue(sections.get("objetivo"));
+  const eventInitial = cleanStructuredValue(sections.get("evento inicial"));
+  const criticalRule = cleanStructuredValue(
+    sections.get("regla crítica") ?? sections.get("regla critica")
+  );
+  const docsPath = cleanStructuredValue(sections.get("contexto documental"));
+  const dateFocal = normalizeStructuredDate(cleanStructuredValue(sections.get("fecha focal")));
+  const focusActors = parseBulletList(sections.get("actores clave"));
+  const observationTargets = parseBulletList(sections.get("quiero observar"));
+  const requestedOutputs = parseBulletList(sections.get("quiero como salida"));
+  const configurationText = cleanStructuredValue(
+    sections.get("configuración") ?? sections.get("configuracion")
+  );
+
+  const rounds =
+    extractRoundsFromConfiguration(configurationText) ??
+    extractRoundsFromConfiguration(cleanStructuredValue(sections.get("horizonte temporal"))) ??
+    undefined;
+
+  const searchEnabled = /b[uú]squeda web habilitada|internet habilitada|web search enabled/i.test(
+    configurationText ?? ""
+  );
+  const maxActorsPerRound = extractSearchBudget(configurationText);
+  const searchAllowProfessions = extractSearchRoles(configurationText);
+
+  const searchDraft = searchEnabled
+    ? {
+        enabled: true,
+        enabledTiers: [...baseConfig.search.enabledTiers],
+        maxActorsPerRound: maxActorsPerRound ?? baseConfig.search.maxActorsPerRound,
+        maxActorsByTier: splitSearchBudget(
+          maxActorsPerRound ?? baseConfig.search.maxActorsPerRound
+        ),
+        allowArchetypes: [],
+        denyArchetypes: [],
+        allowProfessions: searchAllowProfessions,
+        denyProfessions: [],
+        allowActors: [],
+        denyActors: [],
+        cutoffDate: dateFocal ?? baseConfig.search.cutoffDate,
+        categories: baseConfig.search.categories,
+        defaultLanguage: inferLanguageFromBrief(brief, baseConfig.search.defaultLanguage),
+        maxResultsPerQuery: baseConfig.search.maxResultsPerQuery,
+        maxQueriesPerActor: baseConfig.search.maxQueriesPerActor,
+        strictCutoff: true,
+        timeoutMs: baseConfig.search.timeoutMs,
+      }
+    : {
+        enabled: false,
+        enabledTiers: [],
+        maxActorsPerRound: 0,
+        maxActorsByTier: { A: 0, B: 0 },
+        allowArchetypes: [],
+        denyArchetypes: [],
+        allowProfessions: [],
+        denyProfessions: [],
+        allowActors: [],
+        denyActors: [],
+        cutoffDate: dateFocal,
+        categories: baseConfig.search.categories,
+        defaultLanguage: inferLanguageFromBrief(brief, baseConfig.search.defaultLanguage),
+        maxResultsPerQuery: baseConfig.search.maxResultsPerQuery,
+        maxQueriesPerActor: baseConfig.search.maxQueriesPerActor,
+        strictCutoff: baseConfig.search.strictCutoff,
+        timeoutMs: baseConfig.search.timeoutMs,
+      };
+
+  const assumptions = [
+    "Used the operator's structured brief as the authoritative simulation design source.",
+  ];
+  if (criticalRule) assumptions.push(`Critical rule: ${criticalRule}`);
+  if (eventInitial) assumptions.push(`Initial event: ${eventInitial}`);
+  if (requestedOutputs.length > 0) {
+    assumptions.push(`Expected outputs: ${requestedOutputs.join(", ")}`);
+  }
+
+  return {
+    title: title ?? undefined,
+    objective: objective ?? undefined,
+    hypothesis: eventInitial ?? undefined,
+    docsPath: docsPath ?? undefined,
+    rounds,
+    focusActors,
+    search: searchDraft,
+    feed: {
+      embeddingEnabled: baseConfig.feed.embeddingEnabled,
+      embeddingWeight: baseConfig.feed.embeddingWeight,
+    },
+    assumptions,
+    warnings: observationTargets.length > 0 ? [] : ["The brief did not specify observation targets explicitly."],
+  };
+}
+
 export function validateSimulationSpec(spec: SimulationSpec): DesignValidationResult {
   const errors: DesignValidationIssue[] = [];
   const warnings: DesignValidationIssue[] = [];
@@ -410,6 +540,111 @@ function formatList(values: string[]): string {
   return values.length > 0 ? values.join(", ") : "none";
 }
 
+function parseLabeledSections(text: string): Map<string, string> {
+  const sections = new Map<string, string>();
+  let currentLabel: string | null = null;
+  const buffer: string[] = [];
+
+  const flush = (): void => {
+    if (!currentLabel) return;
+    sections.set(currentLabel, buffer.join("\n").trim());
+    buffer.length = 0;
+  };
+
+  for (const line of text.split(/\r?\n/)) {
+    const match = line.match(/^\s*([A-Za-zÁÉÍÓÚáéíóúÑñ ]+)\s*:\s*(.*)$/);
+    if (match) {
+      const label = normalizeLabel(match[1]);
+      if (STRUCTURED_BRIEF_LABELS.has(label)) {
+        flush();
+        currentLabel = label;
+        if (match[2]?.trim()) buffer.push(match[2].trim());
+        continue;
+      }
+    }
+    if (currentLabel) {
+      buffer.push(line);
+    }
+  }
+
+  flush();
+  return sections;
+}
+
+function normalizeLabel(label: string): string {
+  return label.trim().toLowerCase();
+}
+
+function firstLine(value: string | undefined): string | null {
+  if (!value) return null;
+  const line = value.split(/\r?\n/).find((entry) => entry.trim().length > 0);
+  return line ? line.trim() : null;
+}
+
+function cleanStructuredValue(value: string | undefined | null): string | null {
+  if (!value) return null;
+  return value
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^\s*>\s?/, "").trimEnd())
+    .join("\n")
+    .trim();
+}
+
+function parseBulletList(value: string | undefined | null): string[] {
+  if (!value) return [];
+  const items = value
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^\s*[-*]\s*/, "").trim())
+    .filter(Boolean);
+  return Array.from(new Set(items));
+}
+
+function extractRoundsFromConfiguration(value: string | null): number | undefined {
+  if (!value) return undefined;
+  const match = value.match(/(\d+)\s*rondas?/i);
+  if (!match) return undefined;
+  const rounds = Number.parseInt(match[1] ?? "", 10);
+  return Number.isFinite(rounds) ? rounds : undefined;
+}
+
+function extractSearchBudget(value: string | null): number | undefined {
+  if (!value) return undefined;
+  const match = value.match(/m[aá]ximo\s+(\d+)\s+actores?\s+por\s+ronda\s+con\s+b[uú]squeda/i);
+  if (!match) return undefined;
+  const budget = Number.parseInt(match[1] ?? "", 10);
+  return Number.isFinite(budget) ? budget : undefined;
+}
+
+function extractSearchRoles(value: string | null): string[] {
+  if (!value) return [];
+  const line = value
+    .split(/\r?\n/)
+    .find((entry) => /permitir\s+b[uú]squeda\s+a/i.test(entry));
+  if (!line) return [];
+  const stripped = line.replace(/^.*permitir\s+b[uú]squeda\s+a\s*/i, "").trim();
+  return stripped
+    .split(/,|\sy\s/gi)
+    .map((entry) => entry.trim().replace(/\.$/, ""))
+    .filter(Boolean);
+}
+
+function splitSearchBudget(total: number): { A: number; B: number } {
+  const safe = Math.max(1, total);
+  const a = Math.ceil(safe / 2);
+  const b = Math.max(0, safe - a);
+  return { A: a, B: b };
+}
+
+function normalizeStructuredDate(value: string | null): string | null {
+  if (!value) return null;
+  const iso = value.match(/\b\d{4}-\d{2}-\d{2}\b/);
+  return iso ? iso[0] : null;
+}
+
+function inferLanguageFromBrief(brief: string, fallback: string): string {
+  return /[áéíóúñ]|b[uú]squeda|simulaci[oó]n|mercado/i.test(brief) ? "es" : fallback;
+}
+
 export function formatSimulationPlan(
   spec: SimulationSpec,
   validation: DesignValidationResult = validateSimulationSpec(spec)
@@ -465,6 +700,11 @@ export async function interpretSimulationBrief(
   brief: string,
   options: DesignOptions = {}
 ): Promise<SimulationSpec> {
+  const structuredDraft = parseStructuredSimulationBrief(brief, options);
+  if (structuredDraft) {
+    return normalizeSimulationSpec(structuredDraft, options);
+  }
+
   const baseConfig = options.baseConfig ?? defaultConfig();
   const docsHint = normalizeString(options.docsPath);
   const prompt = [

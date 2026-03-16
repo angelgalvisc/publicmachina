@@ -85,6 +85,65 @@ describe("designSimulationFromBrief", () => {
     expect(parsed.search.maxActorsByTier.A).toBe(3);
     expect(parsed.feed.embeddingWeight).toBe(0.4);
   });
+
+  it("uses a structured Spanish operator brief as authoritative input", async () => {
+    const llm = makeDesignLlm();
+    const result = await designSimulationFromBrief(
+      llm,
+      [
+        "Diseña una simulación nueva desde cero y reemplaza cualquier simulación anterior.",
+        "",
+        "Título:",
+        "Impacto narrativo de la noticia de NemoClaw de NVIDIA en Bitcoin",
+        "",
+        "Objetivo:",
+        "Evaluar si la noticia reportada por WIRED sobre NemoClaw puede mover de forma material el sentimiento de mercado y el precio de Bitcoin el 16 de marzo de 2026, o si su efecto es principalmente ruido narrativo.",
+        "",
+        "Fuente principal:",
+        "https://es.wired.com/articulos/nvidia-lanzara-una-plataforma-de-agentes-de-ia-de-codigo-abierto",
+        "",
+        "Fecha focal:",
+        "2026-03-16",
+        "",
+        "Evento inicial:",
+        "El mercado empieza a procesar la noticia de WIRED sobre el posible lanzamiento de NemoClaw de NVIDIA alrededor de GTC 2026.",
+        "",
+        "Actores clave:",
+        "- traders macro",
+        "- traders cripto spot",
+        "- periodistas de mercados",
+        "",
+        "Configuración:",
+        "- 10 agentes",
+        "- 16 rondas",
+        "- búsqueda web habilitada",
+        "- permitir búsqueda a periodistas de tecnología, periodistas de mercados, traders macro y traders cripto",
+        "- máximo 4 actores por ronda con búsqueda",
+      ].join("\n")
+    );
+
+    expect(result.spec.title).toContain("NemoClaw");
+    expect(result.spec.objective).toContain("Bitcoin");
+    expect(result.spec.rounds).toBe(16);
+    expect(result.spec.search.enabled).toBe(true);
+    expect(result.spec.search.enabledTiers).toEqual(["A", "B"]);
+    expect(result.spec.search.maxActorsPerRound).toBe(4);
+    expect(result.spec.search.allowProfessions).toEqual([
+      "periodistas de mercados",
+      "periodistas de tecnología",
+      "traders cripto",
+      "traders macro",
+    ]);
+    expect(result.spec.focusActors).toEqual([
+      "periodistas de mercados",
+      "traders cripto spot",
+      "traders macro",
+    ]);
+
+    const parsed = parseConfig(renderSimulationConfigYaml(result.spec, defaultConfig()));
+    expect(parsed.search.enabled).toBe(true);
+    expect(parsed.search.enabledTiers).toEqual(["A", "B"]);
+  });
 });
 
 describe("validateSimulationSpec", () => {

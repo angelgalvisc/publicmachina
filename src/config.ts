@@ -743,7 +743,7 @@ function validateConfig(config: SimConfig): void {
       )
     );
   }
-  if (config.search.enabledTiers.length === 0) {
+  if (config.search.enabled && config.search.enabledTiers.length === 0) {
     errors.push(
       new ConfigError(
         "enabledTiers must contain at least one tier",
