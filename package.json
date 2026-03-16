@@ -1,7 +1,7 @@
 {
   "name": "publicmachina",
   "version": "0.1.0",
-  "description": "Auditable social simulation engine with SQLite-first runs, replayability, and CKP actor portability.",
+  "description": "Auditable social simulation engine for public narratives, institutional scenarios, and web-grounded agents.",
   "license": "Apache-2.0",
   "type": "module",
   "main": "./dist/index.js",

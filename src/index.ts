@@ -809,8 +809,8 @@ function printBanner(io: CliIO): void {
   io.stdout(` ${O}⌐${W}°‿°${O}¬ ⌐${W}°o°${O}¬ ⌐${W}·_·${O}¬ ⌐${W}>‿<${O}¬ ⌐${W}°‿°${O}¬ ⌐${W}°_°${O}¬ ⌐${W}ᵔ‿ᵔ${O}¬${R}\n`);
   io.stdout(`  ${O}╘═╛   ╘═╛   ╘═╛   ╘═╛   ╘═╛   ╘═╛   ╘═╛${R}\n`);
   io.stdout("\n");
-  io.stdout(`         ${B}${C}S E L D O N C L A W${R}  ${D}v0.1.0${R}\n`);
-  io.stdout(`   ${D}social simulation · web-grounded cognition${R}\n`);
+  io.stdout(`        ${B}${C}P U B L I C M A C H I N A${R}  ${D}v0.1.0${R}\n`);
+  io.stdout(`   ${D}public narrative simulation · web-grounded cognition${R}\n`);
   io.stdout("\n");
 }
 
@@ -818,7 +818,7 @@ export function createProgram(io: CliIO = defaultIO): Command {
   const program = new Command()
     .name("publicmachina")
     .version("0.1.0")
-    .description("Social simulation engine on CKP")
+    .description("Auditable social simulation engine for public narratives")
     .configureOutput({
       writeOut: (text) => io.stdout(text),
       writeErr: (text) => io.stderr(text),
