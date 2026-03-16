@@ -411,6 +411,12 @@ erDiagram
   COMMUNITIES ||--o{ ACTORS : membership
   COMMUNITIES ||--o{ COMMUNITY_OVERLAP : community_a
   COMMUNITIES ||--o{ COMMUNITY_OVERLAP : community_b
+
+  SEARCH_CACHE {
+    id TEXT
+    query TEXT
+    cutoff_date TEXT
+  }
 ```
 
 ## Core invariants
