@@ -51,6 +51,10 @@ export interface ShellIO {
   error(text: string): void;
   readline(): Promise<string>;
   close(): void;
+  /** Echo the user's input back with distinct styling (e.g. colored background). */
+  userEcho?(text: string): void;
+  /** Dim system-level status messages (meta-info, not agent content). */
+  status?(text: string): void;
 }
 
 export type CommandType = "interview" | "export" | "help" | "exit" | "query" | "model" | "clear";
@@ -110,9 +114,10 @@ export async function startShell(ctx: ShellContext, io: ShellIO): Promise<void> 
   const summary = store.getRunRoundSummary(runId);
   const actors = store.getActorsByRun(runId);
 
-  io.output(`PublicMachina Shell — Run ${runId}\n`);
-  io.output(`  ${actors.length} actors, ${summary.roundsCompleted} rounds, ${summary.totalPosts} posts\n`);
-  io.output(`  Type "help" for commands, "exit" to quit.\n\n`);
+  const status = io.status ?? io.output;
+  status(`PublicMachina Shell — Run ${runId}\n`);
+  status(`  ${actors.length} actors, ${summary.roundsCompleted} rounds, ${summary.totalPosts} posts\n`);
+  status(`  Type "help" for commands, "exit" to quit.\n\n`);
 
   const schema = extractSchema(store);
 
@@ -127,6 +132,7 @@ export async function startShell(ctx: ShellContext, io: ShellIO): Promise<void> 
 
     if (!input.trim()) continue;
 
+    io.userEcho?.(input);
     const cmd = classifyIntent(input);
     if (ctx.assistantSession) {
       appendAssistantMessage(ctx.assistantSession, "user", input);
@@ -199,10 +205,10 @@ export async function startShell(ctx: ShellContext, io: ShellIO): Promise<void> 
         case "query": {
           if (ctx.llm && ctx.llm.hasProvider("report")) {
             const sql = await nlToSql(ctx.llm, schema, cmd.args);
-            io.output(`SQL: ${sql}\n`);
+            status(`SQL: ${sql}\n`);
             const { columns, rows } = executeQuery(store, sql);
             io.output(formatTable(columns, rows));
-            io.output(`(${rows.length} rows)\n`);
+            status(`(${rows.length} rows)\n`);
             if (ctx.assistantSession) {
               appendAssistantMessage(
                 ctx.assistantSession,
@@ -215,7 +221,7 @@ export async function startShell(ctx: ShellContext, io: ShellIO): Promise<void> 
             if (/^\s*SELECT\b/i.test(cmd.args)) {
               const { columns, rows } = executeQuery(store, cmd.args);
               io.output(formatTable(columns, rows));
-              io.output(`(${rows.length} rows)\n`);
+              status(`(${rows.length} rows)\n`);
               if (ctx.assistantSession) {
                 appendAssistantMessage(
                   ctx.assistantSession,
@@ -269,5 +275,6 @@ async function handleClearCommand(
 
   const nextSession = await ctx.onAssistantClear();
   ctx.assistantSession = nextSession;
-  io.output("Started a fresh shell conversation. Durable memory and simulation history were kept.\n");
+  const status = io.status ?? io.output;
+  status("Started a fresh shell conversation. Durable memory and simulation history were kept.\n");
 }

@@ -33,6 +33,8 @@ import { handleModelCommand } from "./model-command.js";
 export interface AssistantOperatorIO {
   stdout(text: string): void;
   stderr(text: string): void;
+  /** Dim system-level status messages (progress, meta-info). */
+  status?(text: string): void;
 }
 
 export interface AssistantPromptSession {
@@ -85,7 +87,7 @@ export async function startAssistantOperator(
     updateConfig,
     updateTaskState,
     onProgress: (message) => {
-      io.stdout(`${message}\n`);
+      (io.status ?? io.stdout)(`${message}\n`);
       recordAssistantMessage(session, conversation, "assistant", message);
     },
   };
@@ -379,7 +381,7 @@ async function handleOperatorSlashCommand(
   if (/^\/clear$/i.test(input)) {
     await context.onSessionReset();
     const message = "Started a fresh operator conversation. Durable memory and simulation history were kept.";
-    context.io.stdout(`${message}\n`);
+    (context.io.status ?? context.io.stdout)(`${message}\n`);
     recordAssistantMessage(context.getSession(), context.conversation, "assistant", message);
     context.conversation.length = 0;
     return true;

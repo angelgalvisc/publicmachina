@@ -33,6 +33,7 @@ import { designSimulationFromBrief } from "./design.js";
 import { checkSearchHealth, createSearchProvider } from "./search.js";
 import { existsSync, writeFileSync } from "node:fs";
 import { createInterface } from "node:readline";
+import pc from "picocolors";
 import {
   type AssistantWorkspaceLayout,
   type AssistantSimulationRecord,
@@ -98,6 +99,15 @@ const defaultIO: CliIO = {
   stderr: (text) => process.stderr.write(text),
 };
 
+/** Styled IO for the assistant operator (agent output / error / status). */
+function styledOperatorIO(base: CliIO) {
+  return {
+    stdout: base.stdout,
+    stderr: (text: string) => base.stderr(pc.red(text)),
+    status: (text: string) => base.stdout(pc.dim(text)),
+  };
+}
+
 function formatErrorMessage(err: unknown): string {
   if (err instanceof Error) return err.message;
   return String(err);
@@ -142,7 +152,7 @@ function createPromptSession(): PromptSession {
           reject(new Error("Prompt closed"));
         };
         rl.once("close", onClose);
-        rl.question(`${question}${suffix}: `, (answer) => {
+        rl.question(pc.cyan(`${question}${suffix}: `), (answer) => {
           if (settled) return;
           settled = true;
           rl.off("close", onClose);
@@ -600,12 +610,12 @@ export async function runInitCommand(
       prompt &&
       providerReady
     ) {
-      io.stdout(`\n${renderReadyBanner()}`);
+      io.stdout(`\n${pc.cyan(renderReadyBanner())}`);
       if (canStartAssistantOperator(config)) {
         await startAssistantOperator({
           config,
           configPath: opts.output,
-          io,
+          io: styledOperatorIO(io),
           prompt,
         });
       } else {
@@ -1218,7 +1228,7 @@ export function createProgram(io: CliIO = defaultIO): Command {
         await startAssistantOperator({
           config,
           configPath: DEFAULT_CONFIG_PATH,
-          io,
+          io: styledOperatorIO(io),
           prompt,
         });
       } else {
@@ -1255,7 +1265,7 @@ export function createProgram(io: CliIO = defaultIO): Command {
         await startAssistantOperator({
           config,
           configPath: opts.config,
-          io,
+          io: styledOperatorIO(io),
           prompt,
           mock: opts.mock,
         });
@@ -1630,9 +1640,9 @@ export function createProgram(io: CliIO = defaultIO): Command {
           await startShell(
             shellCtx,
             {
-              prompt: (text) => rl.setPrompt(text),
+              prompt: (text) => rl.setPrompt(pc.cyan(text)),
               output: (text) => io.stdout(text),
-              error: (text) => io.stderr(text),
+              error: (text) => io.stderr(pc.red(text)),
               readline: () =>
                 new Promise<string>((resolve, reject) => {
                   rl.prompt();
@@ -1640,6 +1650,8 @@ export function createProgram(io: CliIO = defaultIO): Command {
                   rl.once("close", () => reject(new Error("EOF")));
                 }),
               close: () => rl.close(),
+              userEcho: (text) => io.stdout(`${pc.bgCyan(pc.black(` ${text} `))}\n`),
+              status: (text) => io.stdout(pc.dim(text)),
             }
           );
         } finally {
