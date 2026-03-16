@@ -11,13 +11,14 @@ The first social simulation engine where agents search the real internet before 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg?style=flat-square)](LICENSE)
 [![Node](https://img.shields.io/badge/Node-%3E%3D18-339933?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.5+-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org)
-[![Tests](https://img.shields.io/badge/Tests-438_passing-brightgreen?style=flat-square)]()
 
 </div>
 
 PublicMachina builds a parallel social world from your scenario, populates it with agents that have beliefs, memories, and personalities, then lets them react. Before they speak, Tier A and Tier B agents can search the real internet through SearXNG, read recent coverage, and use that context in their next decision. Results are cached in SQLite, replayable under the same cutoff date and seed, and inspectable after the run.
 
 Every run lives in one `.db` file. You can open it with `sqlite3`, generate a report, interview actors, or export evolved agents with their memories and decision traces.
+
+PublicMachina supports three real providers today: **Anthropic**, **OpenAI**, and **Moonshot AI**.
 
 ## What can you simulate?
 
@@ -44,7 +45,6 @@ Every scenario runs on real internet context. Every agent decision is auditable.
 | Single-file audit trail (`.db`) | **Yes** | No | No | No |
 | Conversational operator with memory | **Yes** | No | No | No |
 | Natural-language design to spec + config | **Yes** | Partial | No | No |
-| Scale focus | Dozens to hundreds | Thousands | Large-scale populations | Dozens |
 
 PublicMachina is not trying to simulate a million bots. It is built for high-fidelity rehearsals where every decision must be traceable, replayable, and grounded in what the internet actually says, not just what the model remembers from training.
 
@@ -89,6 +89,12 @@ Then just talk to it:
 
 PublicMachina can design the scenario, preview the plan, and run it after your confirmation.
 
+The operator also ships with guardrails:
+
+- graceful stop for live runs through `/stop`, `publicmachina stop`, or `Ctrl+C`
+- per-session spend caps for the operator
+- one active run per workspace by default
+
 For web-grounded search, add a [SearXNG instance](DEPLOYMENT.md). Without it, the engine still simulates, but agents do not read the news first.
 
 <details>
@@ -124,6 +130,7 @@ One file. Open it with `sqlite3`.
 - **Replayable alternate realities**: rerun the same scenario under different seeds, response strategies, or information cutoffs.
 - **Deterministic replay**: seedable PRNG plus cached web context keeps reruns inspectable.
 - **3-tier cognition**: use expensive reasoning only where it matters and keep background populations cheap.
+- **Run safety**: stop cleanly, keep partial results, cap operator spend, and avoid overlapping runs inside one workspace.
 - **Social dynamics**: feed ranking, echo chambers, mutes, blocks, reports, narrative fatigue, and out-of-network exposure.
 - **Event injection**: drop in shocks mid-simulation, from policy changes to viral moments.
 - **Actor interviews**: ask an agent why it changed its mind after the run ends.
@@ -166,6 +173,7 @@ The public-facing flow is conversational, but execution stays typed and auditabl
 | `simulate` | Run an existing simulation |
 | `stop` | Request a graceful stop for the active run |
 | `stats` | Print run metrics and tier breakdown |
+| `inspect` | Inspect actor context, beliefs, posts, and recent state |
 | `report` | Generate a report for a completed run |
 | `interview` | Interview a simulated actor |
 | `shell` | Interactive REPL for NL->SQL, schema inspection, and interviews |
