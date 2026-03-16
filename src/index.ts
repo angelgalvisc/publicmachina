@@ -13,6 +13,7 @@
 
 import { Command } from "commander";
 import { pathToFileURL } from "node:url";
+import { realpathSync } from "node:fs";
 import { SQLiteGraphStore, uuid } from "./db.js";
 import { loadConfig, defaultConfig, saveConfig } from "./config.js";
 import type { SimConfig } from "./config.js";
@@ -1776,7 +1777,7 @@ export async function runCli(argv = process.argv, io: CliIO = defaultIO): Promis
 }
 
 const entryHref = process.argv[1]
-  ? pathToFileURL(process.argv[1]).href
+  ? pathToFileURL(realpathSync(process.argv[1])).href
   : null;
 
 if (entryHref && import.meta.url === entryHref) {
