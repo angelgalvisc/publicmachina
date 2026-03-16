@@ -28,13 +28,12 @@ PublicMachina follows these security principles by design:
 - `config.ts sanitizeForStorage()` redacts all secrets before writing to `run_manifest.config_snapshot`
 - `telemetry.ts sanitizeDetail()` strips secrets from telemetry action detail
 - `ckp.ts scrubSecrets()` removes secrets from export bundles
-- Pairing tokens are held in memory only, never written to SQLite
 
-### NullClaw Gateway Security
-- Pairing is **enabled by default** (`pairing.enabled: true`)
-- Tokens are auto-generated if empty and never logged
-- Disable pairing only for confirmed loopback-only deployments (127.0.0.1)
-- See `DEPLOYMENT.md` for network topology guidance
+### Operator Guardrails
+- **Session cost budget** — `sessionCostBudgetUsd` caps cumulative LLM spend per operator session (`assistant-tools.ts`)
+- **Path validation** — `assertPathInsideWorkspace()` prevents exports and reports from escaping the workspace boundary (`assistant-workspace.ts`)
+- **Run locks** — `acquireActiveRunLock()` ensures only one simulation runs at a time, with stale-lock recovery via PID liveness check (`run-control.ts`)
+- **Graceful cancellation** — SIGINT triggers cooperative stop through `createGracefulStopController()`; the engine checkpoints after the current round before exiting (`run-control.ts`, `engine.ts`)
 
 ### Input Validation
 - Config validation rejects invalid ranges before any processing

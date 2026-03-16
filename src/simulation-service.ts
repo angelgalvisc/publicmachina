@@ -427,7 +427,7 @@ function createPipelineMockLlm(): MockLLMClient {
   return llm;
 }
 
-function ensureRunManifest(
+export function ensureRunManifest(
   store: SQLiteGraphStore,
   runId: string,
   config: SimConfig,

@@ -488,7 +488,7 @@ export interface RoundContext {
 
 // ─── Feed types ───
 
-export interface FeedConfig {
+export interface BaseFeedConfig {
   size: number;
   recencyWeight: number;
   popularityWeight: number;

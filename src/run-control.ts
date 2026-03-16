@@ -37,11 +37,11 @@ export class SimulationCancelledError extends Error {
   }
 }
 
-export function getStopRequestPath(layout: AssistantWorkspaceLayout): string {
+function getStopRequestPath(layout: AssistantWorkspaceLayout): string {
   return join(layout.stateDir, "state", "stop-request.json");
 }
 
-export function getActiveRunLockPath(layout: AssistantWorkspaceLayout): string {
+function getActiveRunLockPath(layout: AssistantWorkspaceLayout): string {
   return join(layout.stateDir, "state", "active-run.json");
 }
 

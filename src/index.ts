@@ -14,7 +14,7 @@
 import { Command } from "commander";
 import { pathToFileURL } from "node:url";
 import { SQLiteGraphStore, uuid } from "./db.js";
-import { loadConfig, defaultConfig, sanitizeForStorage, saveConfig } from "./config.js";
+import { loadConfig, defaultConfig, saveConfig } from "./config.js";
 import type { SimConfig } from "./config.js";
 import { DirectLLMBackend, MockCognitionBackend, getPromptVersion } from "./cognition.js";
 import { runSimulation } from "./engine.js";
@@ -30,7 +30,6 @@ import { buildKnowledgeGraph } from "./graph.js";
 import { generateProfiles } from "./profiles.js";
 import { designSimulationFromBrief } from "./design.js";
 import { checkSearchHealth, createSearchProvider } from "./search.js";
-import type { RunManifest } from "./db.js";
 import { existsSync, writeFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 import {
@@ -69,6 +68,7 @@ import {
   createFeatureLlm,
   createPipelineLlm,
   executePipeline,
+  ensureRunManifest,
 } from "./simulation-service.js";
 import {
   acquireActiveRunLock,
@@ -122,36 +122,6 @@ async function ensureConfigFile(
   if (existsSync(configPath)) return;
   io.stdout(`No config found at ${configPath}. Starting first-run setup.\n\n`);
   await runInitCommand({ output: configPath }, io, promptSession);
-}
-
-function ensureRunManifest(
-  store: SQLiteGraphStore,
-  runId: string,
-  config: SimConfig,
-  hypothesis?: string
-): void {
-  const existing = store.getRun(runId);
-  const graphRevisionId = store.computeGraphRevisionId();
-  const payload: RunManifest = {
-    id: runId,
-    started_at: existing?.started_at ?? new Date().toISOString(),
-    seed: config.simulation.seed,
-    config_snapshot: sanitizeForStorage(config),
-    graph_revision_id: graphRevisionId,
-    hypothesis: hypothesis ?? existing?.hypothesis,
-    total_rounds: existing?.total_rounds,
-    status: existing?.status ?? "paused",
-    finished_at: existing?.finished_at,
-    resumed_from: existing?.resumed_from,
-    version: existing?.version,
-    docs_hash: existing?.docs_hash,
-  };
-
-  if (existing) {
-    store.updateRun(runId, payload);
-  } else {
-    store.createRun(payload);
-  }
 }
 
 function createPromptSession(): PromptSession {

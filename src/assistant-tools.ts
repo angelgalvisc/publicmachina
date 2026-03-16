@@ -223,19 +223,6 @@ export async function executeAssistantTool(
   }
 }
 
-function describeTools(): string {
-  return ASSISTANT_TOOLS.map((tool) => {
-    const params = Object.entries(tool.parameters)
-      .map(([name, description]) => `  - ${name}: ${description}`)
-      .join("\n");
-    return `${tool.name}: ${tool.description}\n${params}`;
-  }).join("\n\n");
-}
-
-export function renderAssistantToolsForPrompt(): string {
-  return describeTools();
-}
-
 async function designSimulationTool(
   args: Record<string, unknown>,
   runtime: AssistantToolRuntime

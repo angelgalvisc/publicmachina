@@ -248,15 +248,29 @@ What it does not preserve yet:
 | `assistant-operator.ts` | Conversational operator loop |
 | `assistant-planner.ts` | Planner that chooses reply vs typed tool |
 | `assistant-tools.ts` | Tool execution layer for design, run, stop, query, report, export, and provider switching |
+| `assistant-context.ts` | Context assembly from identity files, memory, session history, and relevant simulations |
+| `assistant-session.ts` | Session transcript persistence for the operator |
 | `assistant-workspace.ts` | Workspace bootstrap, identity files, memory, and simulation history |
 | `assistant-state.ts` | Persistent operator state, pending confirmations, run progress, and session spend |
 | `run-control.ts` | Stop requests, active-run locks, and signal bridging |
 | `simulation-service.ts` | Thin orchestration layer for design artifacts and pipeline execution |
+| `activation.ts` | Actor activation sampling and hour-aware participation |
+| `feed.ts` | Feed scoring, recency/popularity blending, and network mixing |
+| `fatigue.ts` | Narrative fatigue accumulation and decay |
+| `propagation.ts` | Reaction propagation, contagion, and network spread helpers |
+| `events.ts` | Scheduled shocks and threshold-triggered event expansion |
+| `memory.ts` | Actor memory writes, salience, and recall helpers |
+| `moderation.ts` | Report-threshold moderation actions and enforcement |
+| `time-policy.ts` | Time acceleration and fast-forward policy helpers |
+| `telemetry.ts` | Tier stats, action logging, and operator-facing metrics |
+| `reproducibility.ts` | Seeded PRNG, recorded backend, and replay support |
+| `embeddings.ts` | Optional embedding-backed feed relevance provider |
 | `profiles.ts` | Actor generation from graph entities |
 | `ontology.ts` | Ontology extraction |
 | `ingest.ts` | Document ingestion and chunking |
 | `graph.ts` | Entity resolution and graph build |
 | `llm.ts` | Multi-provider runtime client |
+| `model-catalog.ts` | Curated provider/model catalog and lookup helpers |
 | `model-command.ts` | Shared `/model` command logic |
 | `provider-selection.ts` | Provider resolution and role overrides |
 | `query-service.ts` | Read-only SQL helpers |
@@ -264,6 +278,10 @@ What it does not preserve yet:
 | `interview.ts` | Actor interview flows |
 | `ckp.ts` | Actor export and import |
 | `shell.ts` | Interactive REPL for querying completed runs |
+| `platform.ts` | Platform policy defaults, action contracts, and tier gating |
+| `env.ts` | `.env` loading and API key upserts during setup |
+| `ids.ts` | UUID and deterministic ID helpers |
+| `types.ts` | Shared row, snapshot, and DTO type declarations |
 | `config.ts` | YAML config parsing, validation, sanitization, and assistant limits |
 | `store.ts` / `schema.ts` / `db.ts` | SQLite schema and store implementation |
 

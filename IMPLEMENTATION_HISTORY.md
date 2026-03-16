@@ -10,8 +10,8 @@ Start each session with:
 
 ```
 "PublicMachina, Phase N, Step M. Previous steps passed verification.
- Spec: /Users/agc/Documents/publicmachina/PLAN.md
- Ops: /Users/agc/Documents/publicmachina/DEPLOYMENT.md
+ Spec: PLAN.md
+ Ops: DEPLOYMENT.md
  Implement Step M."
 ```
 
@@ -316,7 +316,7 @@ PublicMachina has moved beyond the original roadmap checkpoints in this file.
 
 - Phases 1-8 are now implemented locally
 - Phase 9A conservative time acceleration is now implemented locally
-- Current verification baseline: `394/394` tests across `27` test files
+- Current verification baseline: `438/438` tests across `35` test files
 - The remaining work is documentation upkeep, live integration validation, and future iteration
 
 The detailed phase sections below are kept as historical implementation notes, not as the current source of truth for status.

@@ -133,7 +133,7 @@ export function getAllowedActionsForTier(
   return opts?.includeSearch ? allowed : allowed.filter((action) => action !== "search");
 }
 
-export function isKnownPlatformAction(action: string): action is PlatformAction {
+function isKnownPlatformAction(action: string): action is PlatformAction {
   return (PLATFORM_ACTIONS as readonly string[]).includes(action);
 }
 
@@ -145,4 +145,3 @@ export function isActionAllowedForTier(
 ): action is PlatformAction {
   return getAllowedActionsForTier(policy, tier, opts).includes(action as PlatformAction);
 }
-

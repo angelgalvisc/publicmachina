@@ -3,8 +3,8 @@
 > Scope note:
 > this file documents the active architecture and near-term roadmap for PublicMachina.
 > When specific details here conflict with the implemented runtime, treat the code as authoritative:
-> [config.ts](/Users/agc/Documents/publicmachina/src/config.ts), [platform.ts](/Users/agc/Documents/publicmachina/src/platform.ts), [schema.ts](/Users/agc/Documents/publicmachina/src/schema.ts), [store.ts](/Users/agc/Documents/publicmachina/src/store.ts), [cognition.ts](/Users/agc/Documents/publicmachina/src/cognition.ts), [feed.ts](/Users/agc/Documents/publicmachina/src/feed.ts), and [engine.ts](/Users/agc/Documents/publicmachina/src/engine.ts).
-> Historical implementation notes and deferred runtime experiments live in [IMPLEMENTATION_HISTORY.md](/Users/agc/Documents/publicmachina/IMPLEMENTATION_HISTORY.md).
+> [config.ts](src/config.ts), [platform.ts](src/platform.ts), [schema.ts](src/schema.ts), [store.ts](src/store.ts), [cognition.ts](src/cognition.ts), [feed.ts](src/feed.ts), and [engine.ts](src/engine.ts).
+> Historical implementation notes and deferred runtime experiments live in [IMPLEMENTATION_HISTORY.md](IMPLEMENTATION_HISTORY.md).
 
 ## Context
 
@@ -1195,7 +1195,7 @@ async function bootstrapExternalRuntime(config: ExternalRuntimeConfig): Promise<
   // 1. Generate External runtime config if autoStart=true
   //    Options (determined during Milestone 0 spike):
   //    A: CLI args → spawn(binary, ['--config', configPath])
-  //    B: env vars → ANTHROPIC_API_KEY, NULLCLAW_PORT
+  //    B: env vars → ANTHROPIC_API_KEY, EXTERNAL_RUNTIME_PORT
   //    C: Pre-configured profile that External runtime already knows
   //
   // 2. Pass upstream provider (model + API key via env)
@@ -1771,7 +1771,7 @@ External runtime integration deferred — actors only need structured LLM comple
 | `interview.ts` | P2 | ✅ Phase 7 |
 | `shell.ts` | P2 | ✅ Phase 8 |
 
-**Phases 1-8 complete, plus Phase 9A conservative time acceleration and the Phase 10-13 foundation** (`405/405` tests across 27 test files). The runtime now includes:
+**Phases 1-8 complete, plus Phase 9A conservative time acceleration and the Phase 10-13 foundation** (`438/438` tests across 35 test files). The runtime now includes:
 
 - expanded actions: `quote`, `unfollow`, `unlike`, `delete`, `mute`, `block`, `report`
 - deterministic platform moderation based on report thresholds

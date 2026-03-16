@@ -1,6 +1,6 @@
 <div align="center">
 
-![PublicMachina](docs/assets/publicmachina-wordmark.svg)
+![PublicMachina](docs/assets/publicmachina-network-hero.png)
 
 # PublicMachina
 

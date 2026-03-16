@@ -29,7 +29,7 @@ export interface DesignedSimulationState {
   rounds: number;
 }
 
-export interface RunEstimate {
+export interface PersistedRunEstimate {
   rounds: number;
   estimatedMinutes: number;
   estimatedTokens: number | null;
@@ -44,7 +44,7 @@ export interface PendingRunConfirmation {
   dbPath: string;
   runId: string;
   historyRecordId: string | null;
-  estimate: RunEstimate;
+  estimate: PersistedRunEstimate;
 }
 
 export interface ActiveRunState {

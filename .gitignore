@@ -46,5 +46,5 @@ simulation.spec.json
 tmp/
 *.tmp
 
-# NullClaw runtime artifacts
+# Runtime artifacts
 *.pid

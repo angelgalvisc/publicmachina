@@ -1,12 +1,12 @@
 # PublicMachina Data Model
 
-This document is the human-readable map of the relational model implemented in [schema.ts](/Users/agc/Documents/publicmachina/src/schema.ts) and accessed through [store.ts](/Users/agc/Documents/publicmachina/src/store.ts). It is meant for:
+This document is the human-readable map of the relational model implemented in [schema.ts](../src/schema.ts) and accessed through [store.ts](../src/store.ts). It is meant for:
 
 - engineers implementing pipeline and runtime code
 - operator tooling and CLI/shell work
 - future frontend or API layers that need a stable mental model
 
-The companion machine-readable file lives at [data-model.json](/Users/agc/Documents/publicmachina/docs/data-model.json).
+The companion machine-readable file lives at [data-model.json](./data-model.json).
 
 ## Layers
 
@@ -380,6 +380,9 @@ erDiagram
   RUN_MANIFEST ||--o{ ROUNDS : scopes
   RUN_MANIFEST ||--o{ DECISION_CACHE : scopes
   RUN_MANIFEST ||--o{ SNAPSHOTS : scopes
+  RUN_MANIFEST ||--o{ MUTES : scopes
+  RUN_MANIFEST ||--o{ BLOCKS : scopes
+  RUN_MANIFEST ||--o{ REPORTS : scopes
   RUN_MANIFEST ||--o{ SEARCH_REQUESTS : scopes
   RUN_MANIFEST ||--o{ SKIPPED_ROUNDS : scopes
 
@@ -394,8 +397,12 @@ erDiagram
   ACTORS ||--o{ ACTOR_INTEREST_EMBEDDINGS : semantic_profile
   ACTORS ||--o{ TELEMETRY : acts
   ACTORS ||--o{ DECISION_CACHE : decides
+  ACTORS ||--o{ MUTES : muter
+  ACTORS ||--o{ BLOCKS : blocker
+  ACTORS ||--o{ REPORTS : reporter
   ACTORS ||--o{ SEARCH_REQUESTS : searches
 
+  POSTS ||--o{ REPORTS : reported_post
   POSTS ||--o{ POST_TOPICS : tagged_with
   POSTS ||--o{ EXPOSURES : reaches
   POSTS ||--o{ POST_EMBEDDINGS : semantic_representation
@@ -435,8 +442,8 @@ These are not separate tables, but they are important to keep in mind when build
 
 ## Recommended uses
 
-- Use [data-model.md](/Users/agc/Documents/publicmachina/docs/data-model.md) for human navigation and architecture reviews.
-- Use [data-model.json](/Users/agc/Documents/publicmachina/docs/data-model.json) for CLI/shell features that need schema-aware behavior:
+- Use [data-model.md](./data-model.md) for human navigation and architecture reviews.
+- Use [data-model.json](./data-model.json) for CLI/shell features that need schema-aware behavior:
   - intent routing
   - validation
   - schema introspection
