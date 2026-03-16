@@ -48,6 +48,13 @@ export function createAssistantSession(
   return { id, path, createdAt, mode };
 }
 
+export function resetAssistantSession(
+  layout: AssistantWorkspaceLayout,
+  mode: "design" = "design"
+): AssistantSession {
+  return createAssistantSession(layout, mode);
+}
+
 export function appendAssistantMessage(
   session: AssistantSession,
   role: AssistantSessionMessage["role"],

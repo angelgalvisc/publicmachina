@@ -15,7 +15,7 @@
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg?style=flat-square)](LICENSE)
 [![Node](https://img.shields.io/badge/Node-%3E%3D18-339933?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.5+-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org)
-[![Tests](https://img.shields.io/badge/Tests-419_passing-brightgreen?style=flat-square)]()
+[![Tests](https://img.shields.io/badge/Tests-420_passing-brightgreen?style=flat-square)]()
 
 ---
 
@@ -414,7 +414,10 @@ Inside the shell you can switch the global default or override a single role wit
 /model provider moonshot --role report
 /model use kimi-k2-thinking --role report
 /model reset --role report
+/clear
 ```
+
+`/clear` starts a fresh shell conversation without deleting the assistant workspace, durable memory, or prior simulation history.
 
 The `doctor` command verifies your environment — including the SearXNG endpoint, if search is enabled.
 
@@ -650,7 +653,7 @@ npx tsc --noEmit
 
 ### Test Suite
 
-419 tests across 30 test files covering:
+420 tests across 30 test files covering:
 
 - Knowledge graph pipeline (ingest → claims → entities → resolution)
 - Ontology extraction and entity typing
@@ -727,7 +730,7 @@ publicmachina/
 │   ├── reproducibility.ts # Seedable PRNG
 │   ├── types.ts          # Domain types
 │   └── ids.ts            # ID generation
-├── tests/                # 30 test files, 419 tests
+├── tests/                # 30 test files, 420 tests
 ├── package.json
 ├── tsconfig.json
 ├── .env.example

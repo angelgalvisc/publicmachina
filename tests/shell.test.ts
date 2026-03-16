@@ -121,6 +121,7 @@ describe("classifyIntent", () => {
   it("classifies help and exit", () => {
     expect(classifyIntent("help").type).toBe("help");
     expect(classifyIntent("?").type).toBe("help");
+    expect(classifyIntent("/clear").type).toBe("clear");
     expect(classifyIntent("exit").type).toBe("exit");
     expect(classifyIntent("/exit").type).toBe("exit");
     expect(classifyIntent("quit").type).toBe("exit");
@@ -381,6 +382,52 @@ describe("startShell", () => {
 
     delete process.env.OPENAI_API_KEY;
     rmSync(dir, { recursive: true, force: true });
+    store.close();
+  });
+
+  it("supports /clear by rotating the active assistant session", async () => {
+    const { store, runId } = setupShellStore();
+    const outputs: string[] = [];
+    const sessionIds: string[] = [];
+    const inputs = ["/clear", "exit"];
+    let clearCalls = 0;
+
+    await startShell(
+      {
+        store,
+        runId,
+        llm: new MockLLMClient(),
+        backend: new MockCognitionBackend(),
+        assistantSession: {
+          id: "session-1",
+          path: "/tmp/session-1.jsonl",
+          createdAt: new Date().toISOString(),
+          mode: "design",
+        },
+        onAssistantClear: async () => {
+          clearCalls += 1;
+          const nextId = `session-${clearCalls + 1}`;
+          sessionIds.push(nextId);
+          return {
+            id: nextId,
+            path: `/tmp/${nextId}.jsonl`,
+            createdAt: new Date().toISOString(),
+            mode: "design",
+          };
+        },
+      },
+      {
+        prompt: () => {},
+        output: (text) => outputs.push(text),
+        error: () => {},
+        readline: async () => inputs.shift() ?? "exit",
+        close: () => {},
+      }
+    );
+
+    expect(clearCalls).toBe(1);
+    expect(sessionIds).toEqual(["session-2"]);
+    expect(outputs.join("")).toContain("Started a fresh shell conversation");
     store.close();
   });
 });

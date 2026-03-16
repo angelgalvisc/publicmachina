@@ -44,7 +44,7 @@ import {
   updateUserProfile,
 } from "./assistant-workspace.js";
 import { buildAssistantContext } from "./assistant-context.js";
-import { appendAssistantMessage, createAssistantSession } from "./assistant-session.js";
+import { appendAssistantMessage, createAssistantSession, resetAssistantSession } from "./assistant-session.js";
 import {
   SUPPORTED_PROVIDERS,
   describeConfiguredModel,
@@ -1532,12 +1532,22 @@ export function createProgram(io: CliIO = defaultIO): Command {
         const config = opts.mock && !existsSync(opts.config)
           ? defaultConfig()
           : getConfig(opts.config);
+        const workspace = config.assistant.enabled
+          ? resolveAssistantWorkspace(config, { configPath: opts.config })
+          : null;
+        if (workspace && config.assistant.permissions.readWorkspace && config.assistant.permissions.writeWorkspace) {
+          bootstrapAssistantWorkspace(workspace, config);
+        }
         const shellCtx: Parameters<typeof startShell>[0] = {
           store,
           runId,
           config,
           configPath: opts.config,
         };
+        if (workspace && config.assistant.permissions.rememberConversations) {
+          shellCtx.assistantSession = createAssistantSession(workspace);
+          shellCtx.onAssistantClear = async () => resetAssistantSession(workspace);
+        }
         shellCtx.llm = createCliLlm(config, { mock: opts.mock, feature: "shell" });
         shellCtx.backend = opts.mock
           ? new MockCognitionBackend()
