@@ -48,6 +48,7 @@ import {
   planIdleFastForward,
   shouldAttemptIdleFastForward,
 } from "./time-policy.js";
+import { SimulationCancelledError, throwIfStopRequested } from "./run-control.js";
 
 // ═══════════════════════════════════════════════════════
 // TYPES
@@ -56,7 +57,8 @@ import {
 export interface EngineResult {
   runId: string;
   totalRounds: number;
-  status: "completed" | "failed";
+  completedRounds: number;
+  status: "completed" | "failed" | "cancelled";
   wallTimeMs: number;
 }
 
@@ -83,6 +85,8 @@ export interface EngineOptions {
   backend: CognitionBackend;
   runId?: string;
   callbacks?: EngineCallbacks;
+  signal?: AbortSignal;
+  shouldStop?: () => boolean;
 }
 
 interface ExecutableActorAction {
@@ -142,6 +146,7 @@ export async function runSimulation(opts: EngineOptions): Promise<EngineResult> 
 
   // Simulation start time (round 0 = 2024-01-01T00:00:00 in configured timezone)
   const startTime = new Date("2024-01-01T00:00:00");
+  let completedRounds = 0;
 
   // Threshold triggers fire once and are remembered across rounds
   const firedTriggers = new Set<string>();
@@ -149,6 +154,11 @@ export async function runSimulation(opts: EngineOptions): Promise<EngineResult> 
   try {
     // 2. Per-round loop
     for (let roundNum = 0; roundNum < numRounds; roundNum++) {
+      throwIfStopRequested({
+        signal: opts.signal,
+        shouldStop: opts.shouldStop,
+        message: "Simulation stop requested before starting the next round.",
+      });
       const roundT0 = Date.now();
 
       const simTimestamp = computeSimTimestamp(
@@ -263,6 +273,11 @@ export async function runSimulation(opts: EngineOptions): Promise<EngineResult> 
         });
 
         if (fastForwardPlan && fastForwardPlan.rounds.length > 0) {
+          throwIfStopRequested({
+            signal: opts.signal,
+            shouldStop: opts.shouldStop,
+            message: "Simulation stop requested before applying fast-forward rounds.",
+          });
           const actorStates =
             config.simulation.snapshotEvery > 0
               ? buildActorSnapshotState(store, runId)
@@ -324,6 +339,7 @@ export async function runSimulation(opts: EngineOptions): Promise<EngineResult> 
           });
 
           roundNum = fastForwardPlan.rounds[fastForwardPlan.rounds.length - 1].roundNum;
+          completedRounds = roundNum + 1;
           continue;
         }
       }
@@ -340,6 +356,12 @@ export async function runSimulation(opts: EngineOptions): Promise<EngineResult> 
           })
         : state;
 
+      throwIfStopRequested({
+        signal: opts.signal,
+        shouldStop: opts.shouldStop,
+        message: "Simulation stop requested before scheduling actor actions.",
+      });
+
       const scheduledActions = await scheduleRoundActions({
         activeActors,
         store,
@@ -353,6 +375,12 @@ export async function runSimulation(opts: EngineOptions): Promise<EngineResult> 
         actorTopicsMap,
         actorBeliefsMap,
         searchProvider,
+      });
+
+      throwIfStopRequested({
+        signal: opts.signal,
+        shouldStop: opts.shouldStop,
+        message: "Simulation stop requested after scheduling actions for the current round.",
       });
 
       let totalPosts = 0;
@@ -478,6 +506,8 @@ export async function runSimulation(opts: EngineOptions): Promise<EngineResult> 
         });
       });
 
+      completedRounds = roundNum + 1;
+
       // Snapshot
       if (
         config.simulation.snapshotEvery > 0 &&
@@ -505,10 +535,26 @@ export async function runSimulation(opts: EngineOptions): Promise<EngineResult> 
     return {
       runId,
       totalRounds: numRounds,
+      completedRounds,
       status: "completed",
       wallTimeMs: Date.now() - t0,
     };
   } catch (err) {
+    if (err instanceof SimulationCancelledError) {
+      store.updateRun(runId, {
+        status: "cancelled",
+        finished_at: new Date().toISOString(),
+        total_rounds: numRounds,
+      });
+
+      return {
+        runId,
+        totalRounds: numRounds,
+        completedRounds,
+        status: "cancelled",
+        wallTimeMs: Date.now() - t0,
+      };
+    }
     store.updateRun(runId, {
       status: "failed",
       finished_at: new Date().toISOString(),
@@ -517,6 +563,7 @@ export async function runSimulation(opts: EngineOptions): Promise<EngineResult> 
     return {
       runId,
       totalRounds: numRounds,
+      completedRounds,
       status: "failed",
       wallTimeMs: Date.now() - t0,
     };

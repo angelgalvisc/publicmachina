@@ -958,4 +958,28 @@ describe("runSimulation — edge cases", () => {
     expect(result.runId).toBeTruthy();
     expect(result.status).toBe("completed");
   });
+
+  it("supports graceful cancellation after a safe checkpoint", async () => {
+    const runId = "run-cancelled";
+    seedActors(runId, 1);
+    backend.setDefault({ action: "idle", reasoning: "" });
+    let stopRequested = false;
+
+    const result = await runSimulation({
+      store,
+      config,
+      backend,
+      runId,
+      shouldStop: () => stopRequested,
+      callbacks: {
+        onRoundComplete: () => {
+          stopRequested = true;
+        },
+      },
+    });
+
+    expect(result.status).toBe("cancelled");
+    expect(result.completedRounds).toBe(1);
+    expect(store.getRun(runId)?.status).toBe("cancelled");
+  });
 });

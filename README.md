@@ -15,7 +15,7 @@
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg?style=flat-square)](LICENSE)
 [![Node](https://img.shields.io/badge/Node-%3E%3D18-339933?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.5+-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org)
-[![Tests](https://img.shields.io/badge/Tests-426_passing-brightgreen?style=flat-square)]()
+[![Tests](https://img.shields.io/badge/Tests-438_passing-brightgreen?style=flat-square)]()
 
 ---
 
@@ -319,13 +319,14 @@ Documents ──→ Ingest ──→ Knowledge Graph ──→ Ontology ──�
 | `search.ts` | SearXNG client, temporal cutoff filtering, cache-first web context | ~500 |
 | `time-policy.ts` | Conservative time acceleration policy for quiet-tail compression | ~150 |
 | `design.ts` | Natural-language brief -> typed simulation spec -> rendered config | ~530 |
-| `assistant-operator.ts` | Default conversational operator: intake, slash commands, planner loop, and conversation lifecycle | ~379 |
+| `assistant-operator.ts` | Default conversational operator: intake, slash commands, planner loop, and conversation lifecycle | ~410 |
 | `assistant-planner.ts` | JSON planner that lets the LLM choose one typed tool step at a time | ~128 |
-| `assistant-state.ts` | Persistent operator task state for active designs, pending confirmations, and run status | ~237 |
-| `assistant-tools.ts` | Typed tool registry and execution layer for design, run, query, interview, report, export, history, and provider switching | ~705 |
+| `assistant-state.ts` | Persistent operator task state for active designs, pending confirmations, and run status | ~276 |
+| `assistant-tools.ts` | Typed tool registry and execution layer for design, run, stop, query, interview, report, export, history, and provider switching | ~896 |
 | `assistant-workspace.ts` | Operator workspace bootstrap, visible identity files, durable memory, and simulation history index | ~563 |
 | `assistant-session.ts` | Persistent operator session transcripts in JSONL | ~110 |
 | `assistant-context.ts` | Operator context assembly from identity, memory, sessions, and past simulations | ~110 |
+| `run-control.ts` | Cooperative stop requests, signal bridging, active-run locks, and cancellation helpers for long-running runs | ~172 |
 | `profiles.ts` | LLM-powered actor generation from knowledge graph entities | ~610 |
 | `ontology.ts` | LLM-powered ontology extraction (entity types, edge types, topics) | ~370 |
 | `ingest.ts` | Document ingestion → chunks → claims (provenance chain) | ~435 |
@@ -340,7 +341,7 @@ Documents ──→ Ingest ──→ Knowledge Graph ──→ Ontology ──�
 | `ckp.ts` | CKP export/import with secret scrubbing and lived-experience bundle capture | ~718 |
 | `shell.ts` | Conversational REPL: NL→SQL, interviews, schema inspection, and live provider/model switching | ~515 |
 | `simulation-service.ts` | Thin orchestration layer for simulation design artifacts, pipeline execution, and run estimates | ~408 |
-| `config.ts` | YAML config parsing, validation, platform policy normalization, and secret sanitization | ~877 |
+| `config.ts` | YAML config parsing, validation, platform policy normalization, secret sanitization, and assistant limits | ~903 |
 | `env.ts` | Lightweight `.env` loading and in-place API key persistence for setup | ~58 |
 | `telemetry.ts` | Round-level metrics persistence (tier calls, timing) | ~155 |
 | `types.ts` | Domain types: rows, snapshots, DTOs, platform/runtime projections | ~537 |
@@ -428,7 +429,7 @@ Inside the shell you can switch the global default or override a single role wit
 /clear
 ```
 
-`/clear` starts a fresh conversation without deleting the assistant workspace, durable memory, or prior simulation history.
+`/clear` starts a fresh conversation without deleting the assistant workspace, durable memory, or prior simulation history. `/stop` requests a graceful stop for the active run; PublicMachina finishes the current safe checkpoint, marks the run as cancelled, and keeps partial results.
 
 The `doctor` command verifies your environment — including the SearXNG endpoint, if search is enabled.
 
@@ -444,6 +445,12 @@ The assistant workspace is configured separately from the LLM provider. On first
 - `.publicmachina/sessions/*.jsonl`
 
 Once setup succeeds, the CLI moves straight into the natural-language simulation conversation instead of dropping you back at the shell prompt.
+
+Operator safety defaults are enforced inside the workspace:
+
+- assistant-generated reports and CKP exports stay inside the configured workspace boundary
+- operator sessions track a configurable spend cap (`assistant.limits.sessionCostBudgetUsd`)
+- one active run per workspace is allowed by default (`assistant.limits.maxConcurrentRuns: 1`)
 
 ### Design a Simulation in Natural Language
 
@@ -507,6 +514,9 @@ node dist/index.js analyze --db simulation.db --mock
 node dist/index.js generate --db simulation.db --run my-run --hypothesis "Tuition protests intensify" --mock
 node dist/index.js simulate --db simulation.db --run my-run --rounds 5 --mock
 
+# Request a graceful stop from another terminal
+node dist/index.js stop --config ./publicmachina.config.yaml --run my-run
+
 # Use the real LLM backend once your config and API key are in place
 node dist/index.js run --db simulation.db --docs ./docs --run my-real-run --rounds 5
 ```
@@ -551,6 +561,7 @@ This is a secondary portability feature, not the runtime core. PublicMachina doe
 | Command | Description |
 |---------|-------------|
 | `simulate` | Run a simulation (supports `--mock` for testing) |
+| `stop` | Request a graceful stop for the active simulation run |
 | `design` | Convert a natural-language brief into a validated spec + generated config |
 | `run` | Full pipeline: ingest → analyze → generate → simulate |
 | `ingest` | Ingest source documents into the provenance store |
@@ -664,7 +675,7 @@ npx tsc --noEmit
 
 ### Test Suite
 
-426 tests across 33 test files covering:
+438 tests across 35 test files covering:
 
 - Knowledge graph pipeline (ingest → claims → entities → resolution)
 - Ontology extraction and entity typing
@@ -728,6 +739,7 @@ publicmachina/
 │   ├── assistant-workspace.ts # Assistant workspace + identity + memory + history
 │   ├── assistant-session.ts # Assistant session persistence
 │   ├── assistant-context.ts # Assistant context builder
+│   ├── run-control.ts    # Cooperative stop requests + signal handling
 │   ├── profiles.ts       # LLM actor generation
 │   ├── ontology.ts       # LLM ontology extraction
 │   ├── ingest.ts         # Document → claims pipeline
@@ -748,7 +760,7 @@ publicmachina/
 │   ├── reproducibility.ts # Seedable PRNG
 │   ├── types.ts          # Domain types
 │   └── ids.ts            # ID generation
-├── tests/                # 33 test files, 426 tests
+├── tests/                # 35 test files, 438 tests
 ├── package.json
 ├── tsconfig.json
 ├── .env.example

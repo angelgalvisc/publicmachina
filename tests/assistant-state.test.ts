@@ -5,6 +5,10 @@ import { afterEach, describe, expect, it } from "vitest";
 import { defaultConfig } from "../src/config.js";
 import { bootstrapAssistantWorkspace, resolveAssistantWorkspace } from "../src/assistant-workspace.js";
 import {
+  addSessionUsage,
+  setActiveRunState,
+  setCancelledRunState,
+  setCancellingRunState,
   loadAssistantTaskState,
   resetConversationState,
   setDesignedSimulationState,
@@ -106,5 +110,49 @@ describe("assistant-state.ts", () => {
     expect(state.status).toBe("designed");
     expect(state.activeDesign?.title).toBe("Election rumors");
     expect(state.pendingRun).toBeNull();
+  });
+
+  it("tracks cancelling and cancelled runs separately from failures", () => {
+    const layout = makeWorkspace();
+
+    setActiveRunState(layout, {
+      title: "Rumor escalation",
+      runId: "run-stop",
+      dbPath: "/tmp/simulation.db",
+      historyRecordId: "hist-3",
+      totalRounds: 12,
+      roundsCompleted: 3,
+      startedAt: "2026-03-16T00:00:00.000Z",
+    });
+    let state = setCancellingRunState(layout);
+    expect(state.status).toBe("cancelling");
+    expect(state.activeRun?.runId).toBe("run-stop");
+
+    state = setCancelledRunState(layout, {
+      title: "Rumor escalation",
+      runId: "run-stop",
+      dbPath: "/tmp/simulation.db",
+      historyRecordId: "hist-3",
+      totalRounds: 12,
+      roundsCompleted: 4,
+      startedAt: "2026-03-16T00:00:00.000Z",
+      finishedAt: "2026-03-16T00:05:00.000Z",
+      reason: "Requested by operator",
+    });
+    expect(state.status).toBe("cancelled");
+    expect(state.activeRun).toBeNull();
+    expect(state.lastCancelledRun?.roundsCompleted).toBe(4);
+    expect(state.lastFailure).toBeNull();
+  });
+
+  it("resets session usage on /clear semantics", () => {
+    const layout = makeWorkspace();
+    let state = addSessionUsage(layout, { costUsd: 1.25, toolCalls: 3 });
+    expect(state.sessionUsage.costUsd).toBeCloseTo(1.25);
+    expect(state.sessionUsage.toolCalls).toBe(3);
+
+    state = resetConversationState(layout);
+    expect(state.sessionUsage.costUsd).toBe(0);
+    expect(state.sessionUsage.toolCalls).toBe(0);
   });
 });

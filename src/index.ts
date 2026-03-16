@@ -34,6 +34,7 @@ import type { RunManifest } from "./db.js";
 import { existsSync, writeFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 import {
+  type AssistantWorkspaceLayout,
   type AssistantSimulationRecord,
   addDurableMemory,
   appendDailyNote,
@@ -69,6 +70,16 @@ import {
   createPipelineLlm,
   executePipeline,
 } from "./simulation-service.js";
+import {
+  acquireActiveRunLock,
+  clearStopRequest,
+  createGracefulStopController,
+  readStopRequest,
+  releaseActiveRunLock,
+  stopRequestAppliesToRun,
+  writeStopRequest,
+} from "./run-control.js";
+import { loadAssistantTaskState, setCancellingRunState } from "./assistant-state.js";
 
 export interface CliIO {
   stdout: (text: string) => void;
@@ -198,6 +209,70 @@ function createPromptSession(): PromptSession {
         stdin.on("data", onData);
       }),
     close: () => rl.close(),
+  };
+}
+
+interface RunStopMonitor {
+  workspace: AssistantWorkspaceLayout | null;
+  signal: AbortSignal;
+  shouldStop: () => boolean;
+  cleanup: () => void;
+}
+
+function createRunStopMonitor(
+  config: SimConfig,
+  io: CliIO,
+  options: { configPath?: string; runId: string; source: "run" | "simulate" }
+): RunStopMonitor {
+  const canUseWorkspace =
+    config.assistant.enabled &&
+    config.assistant.permissions.readWorkspace &&
+    config.assistant.permissions.writeWorkspace;
+  const workspace = canUseWorkspace
+    ? resolveAssistantWorkspace(config, { configPath: options.configPath })
+    : null;
+
+  if (workspace) {
+    bootstrapAssistantWorkspace(workspace, config);
+    clearStopRequest(workspace);
+    if (config.assistant.limits.maxConcurrentRuns <= 1) {
+      acquireActiveRunLock(workspace, {
+        runId: options.runId,
+        pid: process.pid,
+        acquiredAt: new Date().toISOString(),
+        source: options.source,
+      });
+    }
+  }
+
+  const controller = createGracefulStopController(io, () => {
+    if (!workspace) return;
+    writeStopRequest(workspace, {
+      requestedAt: new Date().toISOString(),
+      source: "signal",
+      runId: options.runId,
+      reason: "SIGINT",
+    });
+    const current = loadAssistantTaskState(workspace);
+    if (current.activeRun?.runId === options.runId) {
+      setCancellingRunState(workspace);
+    }
+  });
+
+  return {
+    workspace,
+    signal: controller.signal,
+    shouldStop: () => {
+      if (!workspace) return controller.signal.aborted;
+      return stopRequestAppliesToRun(readStopRequest(workspace), options.runId);
+    },
+    cleanup: () => {
+      if (workspace) {
+        clearStopRequest(workspace);
+        releaseActiveRunLock(workspace, options.runId);
+      }
+      controller.cleanup();
+    },
   };
 }
 
@@ -798,6 +873,11 @@ async function runSimulateCommand(
           promptVersion: getPromptVersion(),
         }
       );
+  const stopMonitor = createRunStopMonitor(config, io, {
+    configPath: opts.config,
+    runId,
+    source: "simulate",
+  });
 
   try {
     const result = await runSimulation({
@@ -805,13 +885,20 @@ async function runSimulateCommand(
       config,
       backend,
       runId,
+      signal: stopMonitor.signal,
+      shouldStop: stopMonitor.shouldStop,
     });
 
     io.stdout(`Simulation ${result.status}\n`);
     io.stdout(`  Run ID: ${result.runId}\n`);
-    io.stdout(`  Rounds: ${result.totalRounds}\n`);
+    io.stdout(
+      result.status === "cancelled"
+        ? `  Completed rounds: ${result.completedRounds}/${result.totalRounds}\n`
+        : `  Rounds: ${result.totalRounds}\n`
+    );
     io.stdout(`  Wall time: ${(result.wallTimeMs / 1000).toFixed(1)}s\n`);
   } finally {
+    stopMonitor.cleanup();
     store.close();
   }
 }
@@ -968,14 +1055,26 @@ async function runPipelineCommand(
   }
 
   const runId = opts.run ?? uuid();
-  const result = await executePipeline({
-    config,
-    dbPath: opts.db,
-    docsPath: opts.docs,
+  const stopMonitor = createRunStopMonitor(config, io, {
+    configPath: opts.config,
     runId,
-    hypothesis: opts.hypothesis,
-    mock: opts.mock,
+    source: "run",
   });
+  let result!: Awaited<ReturnType<typeof executePipeline>>;
+  try {
+    result = await executePipeline({
+      config,
+      dbPath: opts.db,
+      docsPath: opts.docs,
+      runId,
+      hypothesis: opts.hypothesis,
+      mock: opts.mock,
+      signal: stopMonitor.signal,
+      shouldStop: stopMonitor.shouldStop,
+    });
+  } finally {
+    stopMonitor.cleanup();
+  }
 
   io.stdout(`Ingested documents from ${opts.docs}\n`);
   io.stdout(`Generated ${result.actorsCreated} actors for run ${runId}\n`);
@@ -997,8 +1096,61 @@ async function runPipelineCommand(
 
   io.stdout(`Pipeline ${result.status}\n`);
   io.stdout(`  Run ID: ${result.runId}\n`);
-  io.stdout(`  Rounds: ${result.totalRounds}\n`);
+  io.stdout(
+    result.status === "cancelled"
+      ? `  Completed rounds: ${result.completedRounds}/${result.totalRounds}\n`
+      : `  Rounds: ${result.totalRounds}\n`
+  );
   io.stdout(`  Graph revision: ${result.graphRevisionId}\n`);
+}
+
+function runStopCommand(
+  opts: { config?: string; run?: string },
+  io: CliIO
+): void {
+  const configPath = opts.config ?? DEFAULT_CONFIG_PATH;
+  if (!existsSync(configPath)) {
+    throw new Error(`Config file not found: ${configPath}`);
+  }
+
+  const config = getConfig(configPath);
+  if (
+    !config.assistant.enabled ||
+    !config.assistant.permissions.readWorkspace ||
+    !config.assistant.permissions.writeWorkspace
+  ) {
+    throw new Error(
+      "Graceful stop requires an enabled assistant workspace with read/write permissions."
+    );
+  }
+
+  const workspace = resolveAssistantWorkspace(config, { configPath });
+  bootstrapAssistantWorkspace(workspace, config);
+  const taskState = loadAssistantTaskState(workspace);
+  const activeRun = taskState.activeRun;
+  const targetRunId = opts.run ?? activeRun?.runId ?? null;
+
+  if (!targetRunId) {
+    io.stdout("No active simulation run is recorded in the workspace. Pass --run <id> to target a specific run.\n");
+    return;
+  }
+
+  if (opts.run && activeRun && opts.run !== activeRun.runId) {
+    throw new Error(`The active run is ${activeRun.runId}, not ${opts.run}.`);
+  }
+
+  writeStopRequest(workspace, {
+    requestedAt: new Date().toISOString(),
+    source: "command",
+    runId: targetRunId,
+    reason: "Requested from publicmachina stop.",
+  });
+  if (activeRun?.runId === targetRunId) {
+    setCancellingRunState(workspace);
+  }
+  io.stdout(
+    `Graceful stop requested for run ${targetRunId}. PublicMachina will stop after the current safe checkpoint.\n`
+  );
 }
 
 function runInspectCommand(
@@ -1130,6 +1282,15 @@ export function createProgram(io: CliIO = defaultIO): Command {
       } finally {
         prompt.close();
       }
+    });
+
+  program
+    .command("stop")
+    .description("Request a graceful stop for the active simulation run")
+    .option("--config <path>", "config YAML file", DEFAULT_CONFIG_PATH)
+    .option("--run <id>", "explicit run ID to stop")
+    .action((opts) => {
+      runStopCommand(opts, io);
     });
 
   // ═══════════════════════════════════════════════════════

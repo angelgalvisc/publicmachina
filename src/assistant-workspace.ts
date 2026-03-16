@@ -11,7 +11,7 @@ import {
   readdirSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import type { SimConfig } from "./config.js";
 
 export interface AssistantWorkspaceLayout {
@@ -348,6 +348,13 @@ export function listSimulationHistory(
     .map((entry) => entry.record);
 }
 
+export function getSimulationHistoryRecord(
+  layout: AssistantWorkspaceLayout,
+  recordId: string
+): AssistantSimulationRecord | null {
+  return loadSimulationHistory(layout).find((record) => record.id === recordId) ?? null;
+}
+
 export function updateSimulationHistoryRecord(
   layout: AssistantWorkspaceLayout,
   recordId: string,
@@ -400,6 +407,29 @@ export function updateSimulationHistoryRecord(
     "utf-8"
   );
   return next;
+}
+
+export function assertPathInsideWorkspace(
+  layout: AssistantWorkspaceLayout,
+  targetPath: string,
+  message = "Path escapes workspace boundary."
+): string {
+  const workspaceRoot = ensureTrailingSeparator(resolve(layout.rootDir));
+  const resolvedTarget = resolve(targetPath);
+  const normalizedTarget = ensureTrailingSeparator(resolvedTarget);
+  if (!normalizedTarget.startsWith(workspaceRoot)) {
+    throw new Error(message);
+  }
+  return resolvedTarget;
+}
+
+export function ensureWorkspaceOutputDir(
+  layout: AssistantWorkspaceLayout,
+  ...segments: string[]
+): string {
+  const directory = assertPathInsideWorkspace(layout, join(layout.rootDir, ...segments));
+  mkdirSync(directory, { recursive: true });
+  return directory;
 }
 
 export function readWorkspaceReferenceText(
@@ -595,6 +625,10 @@ function buildSimulationSummary(input: SimulationRecordInput, createdAt: string)
 function normalizeOptional(value: string | null | undefined): string | null {
   const trimmed = value?.trim();
   return trimmed ? trimmed : null;
+}
+
+function ensureTrailingSeparator(value: string): string {
+  return value.endsWith(sep) ? value : `${value}${sep}`;
 }
 
 function slugify(input: string): string {

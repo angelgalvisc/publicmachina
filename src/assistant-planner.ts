@@ -9,11 +9,13 @@ export type AssistantPlannerDecision =
   | {
       kind: "respond";
       message: string;
+      meta: AssistantPlannerMeta;
     }
   | {
       kind: "tool_call";
       tool: AssistantToolName;
       arguments: Record<string, unknown>;
+      meta: AssistantPlannerMeta;
     };
 
 export interface AssistantPlannerInput {
@@ -30,6 +32,13 @@ interface PlannerJson {
   message?: unknown;
   tool?: unknown;
   arguments?: unknown;
+}
+
+export interface AssistantPlannerMeta {
+  costUsd: number;
+  inputTokens: number;
+  outputTokens: number;
+  model: string;
 }
 
 export async function planAssistantStep(
@@ -68,16 +77,24 @@ export async function planAssistantStep(
     'JSON schema: {"kind":"respond","message":"..."} or {"kind":"tool_call","tool":"...","arguments":{...}}',
   ].join("\n");
 
-  const { data } = await llm.completeJSON<PlannerJson>("simulation", prompt, {
+  const response = await llm.completeJSON<PlannerJson>("simulation", prompt, {
     system,
     temperature: 0.0,
     maxTokens: 800,
   });
+  const { data } = response;
+  const meta: AssistantPlannerMeta = {
+    costUsd: response.meta.costUsd,
+    inputTokens: response.meta.inputTokens,
+    outputTokens: response.meta.outputTokens,
+    model: response.meta.model,
+  };
 
   if (data.kind === "respond" && typeof data.message === "string" && data.message.trim()) {
     return {
       kind: "respond",
       message: data.message.trim(),
+      meta,
     };
   }
 
@@ -91,12 +108,14 @@ export async function planAssistantStep(
       kind: "tool_call",
       tool: data.tool as AssistantToolName,
       arguments: data.arguments,
+      meta,
     };
   }
 
   return {
     kind: "respond",
     message: "I need a bit more specificity before I act. Tell me whether you want me to design, run, inspect, report on, or compare a simulation.",
+    meta,
   };
 }
 

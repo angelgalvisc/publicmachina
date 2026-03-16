@@ -531,7 +531,7 @@ export interface RunManifest {
   docs_hash?: string;
   graph_revision_id: string;
   total_rounds?: number;
-  status: "running" | "completed" | "failed" | "paused";
+  status: "running" | "completed" | "failed" | "paused" | "cancelled";
   resumed_from?: string;
   version?: string;
 }

@@ -23,6 +23,7 @@ import {
   recordSimulationHistory,
   updateSimulationHistoryRecord,
 } from "./assistant-workspace.js";
+import { SimulationCancelledError, throwIfStopRequested } from "./run-control.js";
 
 export interface DesignSimulationInput {
   config: SimConfig;
@@ -53,13 +54,16 @@ export interface ExecutePipelineInput {
   hypothesis?: string | null;
   mock?: boolean;
   callbacks?: PipelineCallbacks;
+  signal?: AbortSignal;
+  shouldStop?: () => boolean;
 }
 
 export interface PipelineExecutionResult {
   runId: string;
   dbPath: string;
   totalRounds: number;
-  status: "completed" | "failed";
+  completedRounds: number;
+  status: "completed" | "failed" | "cancelled";
   graphRevisionId: string;
   actorsCreated: number;
   claimsExtracted: number;
@@ -221,15 +225,35 @@ export async function executePipeline(
   const store = new SQLiteGraphStore(input.dbPath);
   const runId = input.runId ?? uuid();
   const llm = createPipelineLlm(config, input.mock);
+  let claimsExtracted = 0;
+  let entitiesCreated = 0;
+  let actorsCreated = 0;
 
   try {
+    throwIfStopRequested({
+      signal: input.signal,
+      shouldStop: input.shouldStop,
+      message: "Simulation stop requested before ingestion.",
+    });
     input.callbacks?.onPhase?.("ingest");
     const ingest = await ingestDirectory(store, input.docsPath);
 
+    throwIfStopRequested({
+      signal: input.signal,
+      shouldStop: input.shouldStop,
+      message: "Simulation stop requested before analysis.",
+    });
     input.callbacks?.onPhase?.("analyze");
     const ontology = await extractOntology(store, llm);
     const graph = await buildKnowledgeGraph(store, llm);
+    claimsExtracted = ontology.claimsExtracted;
+    entitiesCreated = graph.entitiesCreated;
 
+    throwIfStopRequested({
+      signal: input.signal,
+      shouldStop: input.shouldStop,
+      message: "Simulation stop requested before profile generation.",
+    });
     input.callbacks?.onPhase?.("generate");
     ensureRunManifest(store, runId, config, input.hypothesis ?? undefined);
     const profiles = await generateProfiles(
@@ -242,7 +266,13 @@ export async function executePipeline(
       },
       config
     );
+    actorsCreated = profiles.actorsCreated;
 
+    throwIfStopRequested({
+      signal: input.signal,
+      shouldStop: input.shouldStop,
+      message: "Simulation stop requested before the simulation engine started.",
+    });
     input.callbacks?.onPhase?.("simulate");
     const backend = input.mock
       ? new MockCognitionBackend()
@@ -252,6 +282,8 @@ export async function executePipeline(
       config,
       backend,
       runId,
+      signal: input.signal,
+      shouldStop: input.shouldStop,
       callbacks: {
         onRoundComplete: (progress) => input.callbacks?.onRound?.(progress),
       },
@@ -261,12 +293,38 @@ export async function executePipeline(
       runId: result.runId,
       dbPath: input.dbPath,
       totalRounds: result.totalRounds,
+      completedRounds: result.completedRounds,
       status: result.status,
       graphRevisionId: graph.graphRevisionId,
-      actorsCreated: profiles.actorsCreated,
-      claimsExtracted: ontology.claimsExtracted,
-      entitiesCreated: graph.entitiesCreated,
+      actorsCreated,
+      claimsExtracted,
+      entitiesCreated,
     };
+  } catch (err) {
+    if (err instanceof SimulationCancelledError) {
+      const existingRun = store.getRun(runId);
+      if (existingRun) {
+        store.updateRun(runId, {
+          status: "cancelled",
+          finished_at: new Date().toISOString(),
+        });
+      }
+      return {
+        runId,
+        dbPath: input.dbPath,
+        totalRounds: Math.max(
+          1,
+          Math.round((config.simulation.totalHours * 60) / config.simulation.minutesPerRound)
+        ),
+        completedRounds: 0,
+        status: "cancelled",
+        graphRevisionId: store.computeGraphRevisionId(),
+        actorsCreated,
+        claimsExtracted,
+        entitiesCreated,
+      };
+    }
+    throw err;
   } finally {
     store.close();
   }

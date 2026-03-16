@@ -154,6 +154,7 @@ export interface AssistantConfig {
   workspaceDir: string;
   permissions: AssistantPermissionsConfig;
   memory: AssistantMemoryConfig;
+  limits: AssistantLimitsConfig;
 }
 
 export interface AssistantPermissionsConfig {
@@ -167,6 +168,11 @@ export interface AssistantMemoryConfig {
   recentSessionMessages: number;
   recentDailyNotes: number;
   relevantSimulationLimit: number;
+}
+
+export interface AssistantLimitsConfig {
+  sessionCostBudgetUsd: number;
+  maxConcurrentRuns: number;
 }
 
 /** ActivationConfig — derived by engine.ts from SimConfig */
@@ -233,6 +239,10 @@ const DEFAULTS: SimConfig = {
       recentSessionMessages: 12,
       recentDailyNotes: 2,
       relevantSimulationLimit: 3,
+    },
+    limits: {
+      sessionCostBudgetUsd: 10,
+      maxConcurrentRuns: 1,
     },
   },
   platform: structuredClone(DEFAULT_PLATFORM_POLICY),
@@ -459,6 +469,22 @@ function validateConfig(config: SimConfig): void {
       new ConfigError(
         "relevantSimulationLimit must be >= 1",
         "assistant.memory.relevantSimulationLimit"
+      )
+    );
+  }
+  if (config.assistant.limits.sessionCostBudgetUsd <= 0) {
+    errors.push(
+      new ConfigError(
+        "sessionCostBudgetUsd must be > 0",
+        "assistant.limits.sessionCostBudgetUsd"
+      )
+    );
+  }
+  if (config.assistant.limits.maxConcurrentRuns < 1) {
+    errors.push(
+      new ConfigError(
+        "maxConcurrentRuns must be >= 1",
+        "assistant.limits.maxConcurrentRuns"
       )
     );
   }

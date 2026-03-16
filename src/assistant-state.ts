@@ -11,6 +11,8 @@ export type AssistantTaskStatus =
   | "designed"
   | "awaiting_confirmation"
   | "running"
+  | "cancelling"
+  | "cancelled"
   | "completed"
   | "failed";
 
@@ -59,6 +61,11 @@ export interface CompletedRunState extends ActiveRunState {
   finishedAt: string;
 }
 
+export interface CancelledRunState extends ActiveRunState {
+  finishedAt: string;
+  reason: string;
+}
+
 export interface FailedRunState {
   title: string | null;
   runId: string | null;
@@ -67,12 +74,19 @@ export interface FailedRunState {
   failedAt: string;
 }
 
+export interface AssistantSessionUsage {
+  costUsd: number;
+  toolCalls: number;
+}
+
 export interface AssistantTaskState {
   status: AssistantTaskStatus;
   updatedAt: string;
   activeDesign: DesignedSimulationState | null;
   pendingRun: PendingRunConfirmation | null;
   activeRun: ActiveRunState | null;
+  sessionUsage: AssistantSessionUsage;
+  lastCancelledRun: CancelledRunState | null;
   lastCompletedRun: CompletedRunState | null;
   lastFailure: FailedRunState | null;
 }
@@ -83,6 +97,11 @@ const DEFAULT_STATE: AssistantTaskState = {
   activeDesign: null,
   pendingRun: null,
   activeRun: null,
+  sessionUsage: {
+    costUsd: 0,
+    toolCalls: 0,
+  },
+  lastCancelledRun: null,
   lastCompletedRun: null,
   lastFailure: null,
 };
@@ -99,6 +118,10 @@ export function loadAssistantTaskState(layout: AssistantWorkspaceLayout): Assist
     return {
       ...structuredClone(DEFAULT_STATE),
       ...parsed,
+      sessionUsage: {
+        ...structuredClone(DEFAULT_STATE).sessionUsage,
+        ...(parsed.sessionUsage ?? {}),
+      },
       updatedAt: parsed.updatedAt ?? new Date().toISOString(),
     };
   } catch {
@@ -126,6 +149,10 @@ export function resetConversationState(layout: AssistantWorkspaceLayout): Assist
     status: current.activeDesign ? "designed" : "idle",
     pendingRun: null,
     activeRun: null,
+    sessionUsage: {
+      costUsd: 0,
+      toolCalls: 0,
+    },
     updatedAt: new Date().toISOString(),
   };
   saveAssistantTaskState(layout, next);
@@ -183,6 +210,18 @@ export function setActiveRunState(
   return next;
 }
 
+export function setCancellingRunState(layout: AssistantWorkspaceLayout): AssistantTaskState {
+  const current = loadAssistantTaskState(layout);
+  if (!current.activeRun) return current;
+  const next: AssistantTaskState = {
+    ...current,
+    status: "cancelling",
+    updatedAt: new Date().toISOString(),
+  };
+  saveAssistantTaskState(layout, next);
+  return next;
+}
+
 export function updateActiveRunProgress(
   layout: AssistantWorkspaceLayout,
   roundsCompleted: number
@@ -201,6 +240,23 @@ export function updateActiveRunProgress(
   return next;
 }
 
+export function addSessionUsage(
+  layout: AssistantWorkspaceLayout,
+  usage: Partial<AssistantSessionUsage>
+): AssistantTaskState {
+  const current = loadAssistantTaskState(layout);
+  const next: AssistantTaskState = {
+    ...current,
+    sessionUsage: {
+      costUsd: Math.max(0, current.sessionUsage.costUsd + (usage.costUsd ?? 0)),
+      toolCalls: Math.max(0, current.sessionUsage.toolCalls + (usage.toolCalls ?? 0)),
+    },
+    updatedAt: new Date().toISOString(),
+  };
+  saveAssistantTaskState(layout, next);
+  return next;
+}
+
 export function setCompletedRunState(
   layout: AssistantWorkspaceLayout,
   completed: CompletedRunState
@@ -211,7 +267,26 @@ export function setCompletedRunState(
     status: "completed",
     pendingRun: null,
     activeRun: null,
+    lastCancelledRun: null,
     lastCompletedRun: completed,
+    lastFailure: null,
+    updatedAt: new Date().toISOString(),
+  };
+  saveAssistantTaskState(layout, next);
+  return next;
+}
+
+export function setCancelledRunState(
+  layout: AssistantWorkspaceLayout,
+  cancelled: CancelledRunState
+): AssistantTaskState {
+  const current = loadAssistantTaskState(layout);
+  const next: AssistantTaskState = {
+    ...current,
+    status: "cancelled",
+    pendingRun: null,
+    activeRun: null,
+    lastCancelledRun: cancelled,
     lastFailure: null,
     updatedAt: new Date().toISOString(),
   };
@@ -229,6 +304,7 @@ export function setFailedRunState(
     status: "failed",
     pendingRun: null,
     activeRun: null,
+    lastCancelledRun: null,
     lastFailure: failure,
     updatedAt: new Date().toISOString(),
   };

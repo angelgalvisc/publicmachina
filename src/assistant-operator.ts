@@ -19,6 +19,7 @@ import {
   type AssistantSession,
 } from "./assistant-session.js";
 import {
+  addSessionUsage,
   loadAssistantTaskState,
   resetConversationState,
   setDesignedSimulationState,
@@ -96,6 +97,18 @@ export async function startAssistantOperator(
     const pendingMessage = `I still have "${taskState.activeDesign.title}" ready to run. Reply yes to launch it, or no to keep the design without running.`;
     io.stdout(`${pendingMessage}\n`);
     recordAssistantMessage(session, conversation, "assistant", pendingMessage);
+  } else if (taskState.status === "running" && taskState.activeRun) {
+    const runningMessage = `A simulation is currently running: ${taskState.activeRun.runId} (${taskState.activeRun.roundsCompleted}/${taskState.activeRun.totalRounds} rounds completed). You can say "stop it" or use /stop from another operator session.`;
+    io.stdout(`${runningMessage}\n`);
+    recordAssistantMessage(session, conversation, "assistant", runningMessage);
+  } else if (taskState.status === "cancelling" && taskState.activeRun) {
+    const stoppingMessage = `A graceful stop has already been requested for ${taskState.activeRun.runId}.`;
+    io.stdout(`${stoppingMessage}\n`);
+    recordAssistantMessage(session, conversation, "assistant", stoppingMessage);
+  } else if (taskState.lastCancelledRun) {
+    const cancelledMessage = `The last run I remember was stopped cleanly: ${taskState.lastCancelledRun.runId} after ${taskState.lastCancelledRun.roundsCompleted}/${taskState.lastCancelledRun.totalRounds} rounds.`;
+    io.stdout(`${cancelledMessage}\n`);
+    recordAssistantMessage(session, conversation, "assistant", cancelledMessage);
   } else if (taskState.lastCompletedRun) {
     const statusMessage = `The latest completed run I remember is ${taskState.lastCompletedRun.runId} for "${taskState.lastCompletedRun.title}".`;
     io.stdout(`${statusMessage}\n`);
@@ -224,12 +237,19 @@ export async function startAssistantOperator(
       });
 
       if (decision.kind === "respond") {
+        runtime.updateTaskState(addSessionUsage(workspace, {
+          costUsd: decision.meta.costUsd,
+        }));
         io.stdout(`${decision.message}\n`);
         recordAssistantMessage(session, conversation, "assistant", decision.message);
         responded = true;
         break;
       }
 
+      runtime.updateTaskState(addSessionUsage(workspace, {
+        costUsd: decision.meta.costUsd,
+        toolCalls: 1,
+      }));
       const result = await executeAssistantTool(decision.tool, decision.arguments, runtime);
       if (result.status === "needs_confirmation") {
         emitToolResult(io, session, conversation, result);
@@ -270,6 +290,7 @@ function requireWorkspace(config: SimConfig, configPath: string): AssistantWorks
 
 function summarizeTaskState(taskState: AssistantTaskState): string {
   const lines = [`- Status: ${taskState.status}`];
+  lines.push(`- Session spend: ~$${taskState.sessionUsage.costUsd.toFixed(2)} across ${taskState.sessionUsage.toolCalls} tool calls`);
   if (taskState.activeDesign) {
     lines.push(`- Active design: ${taskState.activeDesign.title}`);
     lines.push(`- Spec: ${taskState.activeDesign.specPath}`);
@@ -280,6 +301,9 @@ function summarizeTaskState(taskState: AssistantTaskState): string {
   }
   if (taskState.lastCompletedRun) {
     lines.push(`- Last completed run: ${taskState.lastCompletedRun.runId} (${taskState.lastCompletedRun.title})`);
+  }
+  if (taskState.lastCancelledRun) {
+    lines.push(`- Last cancelled run: ${taskState.lastCancelledRun.runId} (${taskState.lastCancelledRun.roundsCompleted}/${taskState.lastCancelledRun.totalRounds} rounds)`);
   }
   if (taskState.lastFailure) {
     lines.push(`- Last failure: ${taskState.lastFailure.message}`);
@@ -334,6 +358,7 @@ async function handleOperatorSlashCommand(
       "Slash commands:",
       "  /help   Show assistant help",
       "  /model  Show or change the current provider/model",
+      "  /stop   Request a graceful stop for the active simulation run",
       "  /clear  Start a fresh conversation without deleting durable memory",
       "  /exit   Leave the operator",
     ].join("\n");
@@ -348,6 +373,12 @@ async function handleOperatorSlashCommand(
     context.io.stdout(`${message}\n`);
     recordAssistantMessage(context.getSession(), context.conversation, "assistant", message);
     context.conversation.length = 0;
+    return true;
+  }
+
+  if (/^\/stop$/i.test(input)) {
+    const result = await executeAssistantTool("stop_simulation", {}, context.runtime);
+    emitToolResult(context.io, context.getSession(), context.conversation, result);
     return true;
   }
 

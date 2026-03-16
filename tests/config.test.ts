@@ -50,6 +50,8 @@ describe("config.ts", () => {
       expect(config.assistant.workspaceDir).toBe("./publicmachina-workspace");
       expect(config.assistant.permissions.rememberConversations).toBe(true);
       expect(config.assistant.memory.relevantSimulationLimit).toBe(3);
+      expect(config.assistant.limits.sessionCostBudgetUsd).toBe(10);
+      expect(config.assistant.limits.maxConcurrentRuns).toBe(1);
 
       expect(config.feed.size).toBe(20);
       expect(config.feed.recencyWeight + config.feed.popularityWeight + config.feed.relevanceWeight).toBeCloseTo(1.0);
@@ -352,6 +354,26 @@ search:
         parseConfig(`
 feed:
   embeddingWeight: 1.5
+`);
+      }).toThrow(ConfigError);
+    });
+
+    it("rejects non-positive assistant session budgets", () => {
+      expect(() => {
+        parseConfig(`
+assistant:
+  limits:
+    sessionCostBudgetUsd: 0
+`);
+      }).toThrow(ConfigError);
+    });
+
+    it("rejects assistant maxConcurrentRuns < 1", () => {
+      expect(() => {
+        parseConfig(`
+assistant:
+  limits:
+    maxConcurrentRuns: 0
 `);
       }).toThrow(ConfigError);
     });

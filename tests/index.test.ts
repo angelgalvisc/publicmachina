@@ -15,8 +15,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import { SQLiteGraphStore } from "../src/db.js";
 import type { ActorRow } from "../src/db.js";
 import { buildInteractiveDesignBrief, runCli, runInitCommand } from "../src/index.js";
-import { loadConfig } from "../src/config.js";
+import { defaultConfig, loadConfig, saveConfig } from "../src/config.js";
 import { bootstrapAssistantWorkspace, recordSimulationHistory, resolveAssistantWorkspace } from "../src/assistant-workspace.js";
+import { readStopRequest } from "../src/run-control.js";
 import { resolveProviderConfig } from "../src/provider-selection.js";
 import { updateRound } from "../src/telemetry.js";
 
@@ -247,6 +248,34 @@ describe("CLI pipeline", () => {
     expect(run?.status).toBe("completed");
     expect(actors.length).toBeGreaterThan(0);
     expect(summary.roundsCompleted).toBe(2);
+  });
+
+  it("writes a graceful stop request through the stop command", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "publicmachina-stop-"));
+    tempDirs.push(dir);
+    const configPath = join(dir, "publicmachina.config.yaml");
+    const config = defaultConfig();
+    config.assistant.workspaceDir = "workspace";
+    saveConfig(configPath, config);
+    const workspace = resolveAssistantWorkspace(config, { configPath });
+    bootstrapAssistantWorkspace(workspace, config);
+
+    const capture = makeIO();
+    await runCli(
+      [
+        "node",
+        "publicmachina",
+        "stop",
+        "--config",
+        configPath,
+        "--run",
+        "run-stop",
+      ],
+      capture.io
+    );
+
+    expect(capture.getStdout()).toContain("Graceful stop requested for run run-stop");
+    expect(readStopRequest(workspace)?.runId).toBe("run-stop");
   });
 
   it("inspects an actor after generation", async () => {
