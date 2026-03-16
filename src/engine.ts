@@ -60,11 +60,29 @@ export interface EngineResult {
   wallTimeMs: number;
 }
 
+export interface EngineRoundProgress {
+  runId: string;
+  roundNum: number;
+  totalRounds: number;
+  activeActors: number;
+  totalPosts: number;
+  totalActions: number;
+  tierACalls: number;
+  tierBCalls: number;
+  tierCActions: number;
+  wallTimeMs: number;
+}
+
+export interface EngineCallbacks {
+  onRoundComplete?: (progress: EngineRoundProgress) => void;
+}
+
 export interface EngineOptions {
   store: GraphStore;
   config: SimConfig;
   backend: CognitionBackend;
   runId?: string;
+  callbacks?: EngineCallbacks;
 }
 
 interface ExecutableActorAction {
@@ -443,6 +461,19 @@ export async function runSimulation(opts: EngineOptions): Promise<EngineResult> 
           tierBCalls,
           tierCActions,
           events: activeEvents,
+          wallTimeMs: roundWallTimeMs,
+        });
+
+        opts.callbacks?.onRoundComplete?.({
+          runId,
+          roundNum,
+          totalRounds: numRounds,
+          activeActors: activeActors.length,
+          totalPosts,
+          totalActions,
+          tierACalls,
+          tierBCalls,
+          tierCActions,
           wallTimeMs: roundWallTimeMs,
         });
       });

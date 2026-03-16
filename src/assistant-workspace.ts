@@ -83,6 +83,17 @@ interface SimulationRecordInput {
   tags?: string[];
 }
 
+interface SimulationRecordUpdate {
+  objective?: string | null;
+  hypothesis?: string | null;
+  context?: string | null;
+  docsPath?: string | null;
+  reportPath?: string | null;
+  dbPath?: string | null;
+  runId?: string | null;
+  tags?: string[];
+}
+
 const USER_BLOCK = "USER-PROFILE";
 const MEMORY_BLOCK = "DURABLE-MEMORY";
 
@@ -335,6 +346,60 @@ export function listSimulationHistory(
     .sort((a, b) => b.score - a.score || a.record.createdAt.localeCompare(b.record.createdAt))
     .slice(0, limit)
     .map((entry) => entry.record);
+}
+
+export function updateSimulationHistoryRecord(
+  layout: AssistantWorkspaceLayout,
+  recordId: string,
+  updates: SimulationRecordUpdate
+): AssistantSimulationRecord {
+  const history = loadSimulationHistory(layout);
+  const index = history.findIndex((record) => record.id === recordId);
+  if (index < 0) {
+    throw new Error(`Simulation history record not found: ${recordId}`);
+  }
+
+  const current = history[index];
+  const next: AssistantSimulationRecord = {
+    ...current,
+    objective: updates.objective === undefined ? current.objective : normalizeOptional(updates.objective),
+    hypothesis: updates.hypothesis === undefined ? current.hypothesis : normalizeOptional(updates.hypothesis),
+    context: updates.context === undefined ? current.context : normalizeOptional(updates.context),
+    docsPath: updates.docsPath === undefined ? current.docsPath : normalizeOptional(updates.docsPath),
+    reportPath:
+      updates.reportPath === undefined
+        ? current.reportPath
+        : maybeCopyArtifact(updates.reportPath, join(current.workspaceDir, "report.md")),
+    dbPath: updates.dbPath === undefined ? current.dbPath : normalizeOptional(updates.dbPath),
+    runId: updates.runId === undefined ? current.runId : normalizeOptional(updates.runId),
+    tags:
+      updates.tags === undefined
+        ? current.tags
+        : [...new Set(updates.tags.map((tag) => tag.trim()).filter(Boolean))],
+  };
+
+  history[index] = next;
+  writeFileSync(layout.files.simulationsIndex, `${JSON.stringify(history, null, 2)}\n`, "utf-8");
+  writeFileSync(
+    join(current.workspaceDir, "summary.md"),
+    buildSimulationSummary(
+      {
+        title: next.title,
+        objective: next.objective,
+        hypothesis: next.hypothesis,
+        brief: next.brief,
+        context: next.context,
+        docsPath: next.docsPath,
+        reportPath: next.reportPath,
+        dbPath: next.dbPath,
+        runId: next.runId,
+        tags: next.tags,
+      },
+      next.createdAt
+    ),
+    "utf-8"
+  );
+  return next;
 }
 
 export function readWorkspaceReferenceText(

@@ -1,0 +1,379 @@
+/**
+ * assistant-operator.ts — Hybrid conversational operator for PublicMachina.
+ */
+
+import type { SimConfig } from "./config.js";
+import {
+  addDurableMemory,
+  appendDailyNote,
+  bootstrapAssistantWorkspace,
+  resolveAssistantWorkspace,
+  updateUserProfile,
+  type AssistantWorkspaceLayout,
+} from "./assistant-workspace.js";
+import { buildAssistantContext } from "./assistant-context.js";
+import {
+  appendAssistantMessage,
+  createAssistantSession,
+  resetAssistantSession,
+  type AssistantSession,
+} from "./assistant-session.js";
+import {
+  loadAssistantTaskState,
+  resetConversationState,
+  setDesignedSimulationState,
+  type AssistantTaskState,
+} from "./assistant-state.js";
+import { planAssistantStep } from "./assistant-planner.js";
+import { ASSISTANT_TOOLS, executeAssistantTool, type AssistantToolRuntime } from "./assistant-tools.js";
+import { createFeatureLlm } from "./simulation-service.js";
+import { handleModelCommand } from "./model-command.js";
+
+export interface AssistantOperatorIO {
+  stdout(text: string): void;
+  stderr(text: string): void;
+}
+
+export interface AssistantPromptSession {
+  ask: (question: string, defaultValue?: string) => Promise<string>;
+}
+
+export interface StartAssistantOperatorOptions {
+  config: SimConfig;
+  configPath: string;
+  io: AssistantOperatorIO;
+  prompt: AssistantPromptSession;
+  mock?: boolean;
+}
+
+export async function startAssistantOperator(
+  options: StartAssistantOperatorOptions
+): Promise<void> {
+  const { io, prompt } = options;
+  let config = options.config;
+  const workspace = requireWorkspace(config, options.configPath);
+  bootstrapAssistantWorkspace(workspace, config);
+
+  let session = config.assistant.permissions.rememberConversations
+    ? createAssistantSession(workspace, "design")
+    : undefined;
+  let taskState = loadAssistantTaskState(workspace);
+  let plannerLlm = createFeatureLlm(config, { mock: options.mock, feature: "assistant" });
+  let preferredName = "there";
+  const conversation: Array<{ role: "user" | "assistant"; content: string }> = [];
+
+  const updateConfig = async (nextConfig: SimConfig): Promise<void> => {
+    config = nextConfig;
+    plannerLlm = createFeatureLlm(nextConfig, { mock: options.mock, feature: "assistant" });
+  };
+
+  const updateTaskState = (nextState: AssistantTaskState): void => {
+    taskState = nextState;
+  };
+
+  const runtime: AssistantToolRuntime = {
+    get config() {
+      return config;
+    },
+    configPath: options.configPath,
+    workspace,
+    get taskState() {
+      return taskState;
+    },
+    mock: options.mock,
+    updateConfig,
+    updateTaskState,
+    onProgress: (message) => {
+      io.stdout(`${message}\n`);
+      recordAssistantMessage(session, conversation, "assistant", message);
+    },
+  };
+
+  io.stdout("Hello. I'm PublicMachina.\n");
+  recordAssistantMessage(session, conversation, "assistant", "Hello. I'm PublicMachina.");
+
+  if (taskState.status === "awaiting_confirmation" && taskState.pendingRun && taskState.activeDesign) {
+    const pendingMessage = `I still have "${taskState.activeDesign.title}" ready to run. Reply yes to launch it, or no to keep the design without running.`;
+    io.stdout(`${pendingMessage}\n`);
+    recordAssistantMessage(session, conversation, "assistant", pendingMessage);
+  } else if (taskState.lastCompletedRun) {
+    const statusMessage = `The latest completed run I remember is ${taskState.lastCompletedRun.runId} for "${taskState.lastCompletedRun.title}".`;
+    io.stdout(`${statusMessage}\n`);
+    recordAssistantMessage(session, conversation, "assistant", statusMessage);
+  } else if (taskState.lastFailure) {
+    const failureMessage = `The last run failed: ${taskState.lastFailure.message}`;
+    io.stdout(`${failureMessage}\n`);
+    recordAssistantMessage(session, conversation, "assistant", failureMessage);
+  }
+
+  const ready = await askYesNo(prompt, "Are you ready to simulate?", true);
+  recordAssistantMessage(
+    session,
+    conversation,
+    "user",
+    ready ? "Yes, I am ready to simulate." : "No, not yet."
+  );
+  if (!ready) {
+    const farewell = "Whenever you're ready, run PublicMachina again and we'll start there.";
+    io.stdout(`${farewell}\n`);
+    recordAssistantMessage(session, conversation, "assistant", farewell);
+    return;
+  }
+
+  const preferred = await prompt.ask("What should I call you?", "there");
+  preferredName = preferred.trim() || "there";
+  updateUserProfile(workspace, { preferredName });
+  recordAssistantMessage(session, conversation, "user", `Call me ${preferredName}.`);
+  const greet = `Good to meet you, ${preferredName}.`;
+  io.stdout(`${greet}\n`);
+  recordAssistantMessage(session, conversation, "assistant", greet);
+
+  const context = await prompt.ask(
+    "What context should I keep in mind? You can mention the domain, region, organization, or objective.",
+    ""
+  );
+  if (context.trim()) {
+    updateUserProfile(workspace, {
+      lastContext: context.trim(),
+      addNote: context.trim(),
+    });
+    addDurableMemory(workspace, {
+      kind: "context",
+      summary: `Operator context for this session: ${context.trim()}`,
+      tags: [],
+    });
+    appendDailyNote(workspace, {
+      title: "Operator session context",
+      lines: [context.trim()],
+    });
+    recordAssistantMessage(session, conversation, "user", `Context: ${context.trim()}`);
+  }
+
+  let nextInput = await prompt.ask(
+    `What would you like to work on today, ${preferredName}? You can ask me to design, run, inspect, report on, or compare simulations.`,
+    ""
+  );
+
+  while (true) {
+    const input = nextInput.trim();
+    nextInput = "";
+    if (!input) {
+      nextInput = await prompt.ask(`${preferredName}`, "");
+      continue;
+    }
+
+    if (await handleOperatorSlashCommand(input, {
+      io,
+      getSession: () => session,
+      conversation,
+      runtime,
+      onSessionReset: async () => {
+        taskState = resetConversationState(workspace);
+        session = resetAssistantSession(workspace, "design");
+      },
+    })) {
+      if (/^(\/exit|quit|exit)$/i.test(input)) {
+        return;
+      }
+      nextInput = await prompt.ask(`${preferredName}`, "");
+      continue;
+    }
+
+    recordAssistantMessage(session, conversation, "user", input);
+
+    if (taskState.status === "awaiting_confirmation" && taskState.pendingRun) {
+      const normalized = input.toLowerCase();
+      if (/^(y|yes|run|confirm)$/i.test(normalized)) {
+        const pending = taskState.pendingRun;
+        const result = await executeAssistantTool(
+          "run_simulation",
+          {
+            specPath: pending.specPath,
+            configPath: pending.configPath,
+            docsPath: pending.docsPath,
+            confirmed: true,
+          },
+          runtime
+        );
+        emitToolResult(io, session, conversation, result);
+        nextInput = await prompt.ask(`${preferredName}`, "");
+        continue;
+      }
+      if (/^(n|no|cancel)$/i.test(normalized)) {
+        taskState = setDesignedSimulationState(workspace, taskState.activeDesign!);
+        const message = "Understood. I kept the design and cleared the pending run confirmation.";
+        io.stdout(`${message}\n`);
+        recordAssistantMessage(session, conversation, "assistant", message);
+        nextInput = await prompt.ask(`${preferredName}`, "");
+        continue;
+      }
+    }
+
+    const assistantContext = buildAssistantContext(workspace, config, input);
+    const toolTrace: string[] = [];
+    let responded = false;
+
+    for (let step = 0; step < 4; step += 1) {
+      const decision = await planAssistantStep(plannerLlm, {
+        contextSummary: assistantContext.summary,
+        currentTaskSummary: summarizeTaskState(taskState),
+        conversation,
+        userInput: input,
+        tools: ASSISTANT_TOOLS,
+        toolTrace,
+      });
+
+      if (decision.kind === "respond") {
+        io.stdout(`${decision.message}\n`);
+        recordAssistantMessage(session, conversation, "assistant", decision.message);
+        responded = true;
+        break;
+      }
+
+      const result = await executeAssistantTool(decision.tool, decision.arguments, runtime);
+      if (result.status === "needs_confirmation") {
+        emitToolResult(io, session, conversation, result);
+        responded = true;
+        break;
+      }
+      if (result.status === "error") {
+        emitToolResult(io, session, conversation, result);
+        responded = true;
+        break;
+      }
+
+      toolTrace.push(`TOOL ${decision.tool}: ${result.summary}${result.details ? `\n${result.details}` : ""}`);
+      if (step === 3) {
+        emitToolResult(io, session, conversation, result);
+        responded = true;
+      }
+    }
+
+    if (!responded) {
+      const fallback = "I have the work staged. Tell me whether to keep refining it, run it, or inspect something from history.";
+      io.stdout(`${fallback}\n`);
+      recordAssistantMessage(session, conversation, "assistant", fallback);
+    }
+
+    nextInput = await prompt.ask(`${preferredName}`, "");
+  }
+}
+
+function requireWorkspace(config: SimConfig, configPath: string): AssistantWorkspaceLayout {
+  if (!config.assistant.enabled || !config.assistant.permissions.readWorkspace || !config.assistant.permissions.writeWorkspace) {
+    throw new Error(
+      "The operator assistant requires an enabled workspace with read/write permissions. Re-run `publicmachina setup` and allow workspace access."
+    );
+  }
+  return resolveAssistantWorkspace(config, { configPath });
+}
+
+function summarizeTaskState(taskState: AssistantTaskState): string {
+  const lines = [`- Status: ${taskState.status}`];
+  if (taskState.activeDesign) {
+    lines.push(`- Active design: ${taskState.activeDesign.title}`);
+    lines.push(`- Spec: ${taskState.activeDesign.specPath}`);
+    lines.push(`- Config: ${taskState.activeDesign.configPath}`);
+  }
+  if (taskState.pendingRun) {
+    lines.push(`- Pending run: ${taskState.pendingRun.runId} (${taskState.pendingRun.estimate.rounds} rounds)`);
+  }
+  if (taskState.lastCompletedRun) {
+    lines.push(`- Last completed run: ${taskState.lastCompletedRun.runId} (${taskState.lastCompletedRun.title})`);
+  }
+  if (taskState.lastFailure) {
+    lines.push(`- Last failure: ${taskState.lastFailure.message}`);
+  }
+  return lines.join("\n");
+}
+
+function recordAssistantMessage(
+  session: AssistantSession | undefined,
+  conversation: Array<{ role: "user" | "assistant"; content: string }>,
+  role: "user" | "assistant",
+  content: string
+): void {
+  conversation.push({ role, content });
+  if (session) {
+    appendAssistantMessage(session, role, content);
+  }
+}
+
+function emitToolResult(
+  io: AssistantOperatorIO,
+  session: AssistantSession | undefined,
+  conversation: Array<{ role: "user" | "assistant"; content: string }>,
+  result: { summary: string; details?: string }
+): void {
+  const message = result.details ? `${result.summary}\n${result.details}` : result.summary;
+  io.stdout(`${message}\n`);
+  recordAssistantMessage(session, conversation, "assistant", message);
+}
+
+async function askYesNo(prompt: AssistantPromptSession, question: string, defaultValue = true): Promise<boolean> {
+  const answer = await prompt.ask(question, defaultValue ? "yes" : "no");
+  const trimmed = answer.trim().toLowerCase();
+  if (!trimmed) return defaultValue;
+  return /^(y|yes|true|1)$/i.test(trimmed);
+}
+
+async function handleOperatorSlashCommand(
+  input: string,
+  context: {
+    io: AssistantOperatorIO;
+    getSession: () => AssistantSession | undefined;
+    conversation: Array<{ role: "user" | "assistant"; content: string }>;
+    runtime: AssistantToolRuntime;
+    onSessionReset: () => Promise<void>;
+  }
+): Promise<boolean> {
+  if (!input.startsWith("/")) return false;
+
+  if (/^\/help$/i.test(input)) {
+    const help = [
+      "Slash commands:",
+      "  /help   Show assistant help",
+      "  /model  Show or change the current provider/model",
+      "  /clear  Start a fresh conversation without deleting durable memory",
+      "  /exit   Leave the operator",
+    ].join("\n");
+    context.io.stdout(`${help}\n`);
+    recordAssistantMessage(context.getSession(), context.conversation, "assistant", help);
+    return true;
+  }
+
+  if (/^\/clear$/i.test(input)) {
+    await context.onSessionReset();
+    const message = "Started a fresh operator conversation. Durable memory and simulation history were kept.";
+    context.io.stdout(`${message}\n`);
+    recordAssistantMessage(context.getSession(), context.conversation, "assistant", message);
+    context.conversation.length = 0;
+    return true;
+  }
+
+  if (/^\/model(?:\s+.*)?$/i.test(input)) {
+    const args = input.replace(/^\/model/i, "").trim();
+    await handleModelCommand(
+      {
+        config: context.runtime.config,
+        configPath: context.runtime.configPath,
+        onConfigUpdate: context.runtime.updateConfig,
+      },
+      {
+        output: (text) => context.io.stdout(text),
+        error: (text) => context.io.stderr(text),
+      },
+      args
+    );
+    return true;
+  }
+
+  if (/^(\/exit|quit|exit)$/i.test(input)) {
+    const goodbye = "Goodbye.";
+    context.io.stdout(`${goodbye}\n`);
+    recordAssistantMessage(context.getSession(), context.conversation, "assistant", goodbye);
+    return true;
+  }
+
+  return false;
+}

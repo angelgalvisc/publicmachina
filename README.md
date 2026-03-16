@@ -15,7 +15,7 @@
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg?style=flat-square)](LICENSE)
 [![Node](https://img.shields.io/badge/Node-%3E%3D18-339933?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.5+-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org)
-[![Tests](https://img.shields.io/badge/Tests-422_passing-brightgreen?style=flat-square)]()
+[![Tests](https://img.shields.io/badge/Tests-426_passing-brightgreen?style=flat-square)]()
 
 ---
 
@@ -69,6 +69,7 @@ At the operator level, it gives researchers and builders a way to design simulat
 
 - **Web-grounded decisions** — Tier A/B agents query real web sources via SearXNG before deciding, with an exact cutoff applied by PublicMachina and cache-first determinism. [See details below.](#web-grounded-search)
 - **Natural-language simulation design** — Turn a free-form brief into a validated `simulation.spec.json` plus deterministic `publicmachina.config.yaml`
+- **Conversational operator** — The default `publicmachina` entrypoint acts as a hybrid operator: slash commands stay deterministic, everything else routes through typed tools selected by the LLM
 - **Operator assistant workspace** — CKP-inspired assistant workspace with `IDENTITY.md`, `SOUL.md`, `USER.md`, `MEMORY.md`, daily notes, session transcripts, and simulation history
 - **Deterministic simulations** — Seedable PRNG (xoshiro128**) guarantees identical runs from the same seed
 - **3-tier cognition** — Tier A (always LLM), Tier B (probabilistic LLM), Tier C (rule-based) for cost-efficient agent decisions
@@ -318,6 +319,10 @@ Documents ──→ Ingest ──→ Knowledge Graph ──→ Ontology ──�
 | `search.ts` | SearXNG client, temporal cutoff filtering, cache-first web context | ~500 |
 | `time-policy.ts` | Conservative time acceleration policy for quiet-tail compression | ~150 |
 | `design.ts` | Natural-language brief -> typed simulation spec -> rendered config | ~530 |
+| `assistant-operator.ts` | Default conversational operator: intake, slash commands, planner loop, and conversation lifecycle | ~379 |
+| `assistant-planner.ts` | JSON planner that lets the LLM choose one typed tool step at a time | ~128 |
+| `assistant-state.ts` | Persistent operator task state for active designs, pending confirmations, and run status | ~237 |
+| `assistant-tools.ts` | Typed tool registry and execution layer for design, run, query, interview, report, export, history, and provider switching | ~705 |
 | `assistant-workspace.ts` | Operator workspace bootstrap, visible identity files, durable memory, and simulation history index | ~563 |
 | `assistant-session.ts` | Persistent operator session transcripts in JSONL | ~110 |
 | `assistant-context.ts` | Operator context assembly from identity, memory, sessions, and past simulations | ~110 |
@@ -326,12 +331,15 @@ Documents ──→ Ingest ──→ Knowledge Graph ──→ Ontology ──�
 | `ingest.ts` | Document ingestion → chunks → claims (provenance chain) | ~435 |
 | `graph.ts` | Entity resolution, merge candidates, confidence scoring | ~540 |
 | `llm.ts` | Multi-provider runtime client (Anthropic, OpenAI, Moonshot) + `MockLLMClient` | ~405 |
+| `model-command.ts` | Shared `/model` command logic for interactive surfaces | ~220 |
 | `model-catalog.ts` | Curated provider/model presets, aliases, and display metadata for onboarding and `/model` | ~149 |
 | `provider-selection.ts` | Provider/model normalization, resolution, and global/role-specific switching helpers | ~268 |
+| `query-service.ts` | Shared read-only SQL generation and formatting helpers for simulation databases | ~101 |
 | `report.ts` | SQL → metrics + optional LLM narrative | ~200 |
 | `interview.ts` | Actor interview flow (single-turn and multi-turn) | ~200 |
 | `ckp.ts` | CKP export/import with secret scrubbing and lived-experience bundle capture | ~718 |
 | `shell.ts` | Conversational REPL: NL→SQL, interviews, schema inspection, and live provider/model switching | ~515 |
+| `simulation-service.ts` | Thin orchestration layer for simulation design artifacts, pipeline execution, and run estimates | ~408 |
 | `config.ts` | YAML config parsing, validation, platform policy normalization, and secret sanitization | ~877 |
 | `env.ts` | Lightweight `.env` loading and in-place API key persistence for setup | ~58 |
 | `telemetry.ts` | Round-level metrics persistence (tier calls, timing) | ~155 |
@@ -384,12 +392,15 @@ node dist/index.js setup
 # Or launch the default interactive entrypoint
 node dist/index.js
 
+# Or enter the conversational operator explicitly
+node dist/index.js assistant
+
 # Or copy the example env file
 cp .env.example .env
 # Edit .env with your Anthropic, OpenAI, or Moonshot API key
 ```
 
-The `setup` command generates a `publicmachina.config.yaml`, offers curated model presets for Anthropic, OpenAI, and Moonshot AI, writes API keys to `.env` instead of storing secrets in YAML, and bootstraps a dedicated assistant workspace where PublicMachina can keep identity files, daily notes, session history, and previous simulation records.
+The `setup` command generates a `publicmachina.config.yaml`, offers curated model presets for Anthropic, OpenAI, and Moonshot AI, writes API keys to `.env` instead of storing secrets in YAML, and bootstraps a dedicated assistant workspace where PublicMachina can keep identity files, daily notes, session history, current task state, and previous simulation records.
 Provider selection is stored as a global default plus optional role-specific overrides:
 
 ```yaml
@@ -417,7 +428,7 @@ Inside the shell you can switch the global default or override a single role wit
 /clear
 ```
 
-`/clear` starts a fresh shell conversation without deleting the assistant workspace, durable memory, or prior simulation history.
+`/clear` starts a fresh conversation without deleting the assistant workspace, durable memory, or prior simulation history.
 
 The `doctor` command verifies your environment — including the SearXNG endpoint, if search is enabled.
 
@@ -653,7 +664,7 @@ npx tsc --noEmit
 
 ### Test Suite
 
-422 tests across 31 test files covering:
+426 tests across 33 test files covering:
 
 - Knowledge graph pipeline (ingest → claims → entities → resolution)
 - Ontology extraction and entity typing
@@ -710,6 +721,10 @@ publicmachina/
 │   ├── embeddings.ts     # Embedding cache + semantic features
 │   ├── search.ts         # SearXNG-backed web grounding
 │   ├── design.ts         # Natural-language simulation design
+│   ├── assistant-operator.ts # Default conversational operator
+│   ├── assistant-planner.ts # Planner loop for typed tools
+│   ├── assistant-state.ts # Current operator task state
+│   ├── assistant-tools.ts # Typed tool registry + executor
 │   ├── assistant-workspace.ts # Assistant workspace + identity + memory + history
 │   ├── assistant-session.ts # Assistant session persistence
 │   ├── assistant-context.ts # Assistant context builder
@@ -718,9 +733,12 @@ publicmachina/
 │   ├── ingest.ts         # Document → claims pipeline
 │   ├── graph.ts          # Entity resolution
 │   ├── llm.ts            # Multi-provider LLM client
+│   ├── model-command.ts  # Shared /model command handling
 │   ├── model-catalog.ts  # Curated provider/model catalog
 │   ├── provider-selection.ts # Provider resolution + override helpers
+│   ├── query-service.ts  # Shared read-only SQL query helpers
 │   ├── report.ts         # SQL → report pipeline
+│   ├── simulation-service.ts # Thin design/run orchestration
 │   ├── interview.ts      # Actor interview flows
 │   ├── ckp.ts            # CKP export/import
 │   ├── shell.ts          # Interactive REPL
@@ -730,7 +748,7 @@ publicmachina/
 │   ├── reproducibility.ts # Seedable PRNG
 │   ├── types.ts          # Domain types
 │   └── ids.ts            # ID generation
-├── tests/                # 31 test files, 422 tests
+├── tests/                # 33 test files, 426 tests
 ├── package.json
 ├── tsconfig.json
 ├── .env.example

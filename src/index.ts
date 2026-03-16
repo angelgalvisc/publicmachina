@@ -19,7 +19,7 @@ import type { SimConfig } from "./config.js";
 import { DirectLLMBackend, MockCognitionBackend, getPromptVersion } from "./cognition.js";
 import { runSimulation } from "./engine.js";
 import { getTierStats } from "./telemetry.js";
-import { LLMClient, MockLLMClient, validateProviderConnection } from "./llm.js";
+import { LLMClient, validateProviderConnection } from "./llm.js";
 import { interviewActor, resolveActorByName, formatActorContext } from "./interview.js";
 import { exportAgent, importAgent } from "./ckp.js";
 import { generateReport } from "./report.js";
@@ -56,6 +56,7 @@ import {
   type SupportedProvider,
 } from "./model-catalog.js";
 import { loadEnvFile, upsertEnvVar } from "./env.js";
+import { startAssistantOperator } from "./assistant-operator.js";
 import {
   PROVIDER_ROLES,
   createProviderConfig,
@@ -63,6 +64,11 @@ import {
   setRoleProviderSelection,
   type ProviderRole,
 } from "./provider-selection.js";
+import {
+  createFeatureLlm,
+  createPipelineLlm,
+  executePipeline,
+} from "./simulation-service.js";
 
 export interface CliIO {
   stdout: (text: string) => void;
@@ -105,133 +111,6 @@ async function ensureConfigFile(
   if (existsSync(configPath)) return;
   io.stdout(`No config found at ${configPath}. Starting first-run setup.\n\n`);
   await runInitCommand({ output: configPath }, io, promptSession);
-}
-
-function createCliLlm(
-  config: SimConfig,
-  options: { mock?: boolean; feature?: "report" | "shell" | "design" } = {}
-): LLMClient {
-  if (options.mock) {
-    const llm = new MockLLMClient();
-    if (options.feature === "report") {
-      llm.setResponse("Rounds completed:", "Mock report narrative");
-    }
-    if (options.feature === "design") {
-      llm.setResponse(
-        "Interpret the following simulation brief",
-        JSON.stringify({
-          title: "Global Product Recall Response",
-          objective:
-            "Simulate how narratives and institutional responses evolve after a global consumer electronics recall.",
-          hypothesis:
-            "Journalists and regulators accelerate negative sentiment faster than the company can stabilize the narrative.",
-          docsPath: null,
-          rounds: 10,
-          focusActors: ["customers", "journalists", "regulators", "company spokespeople", "investors"],
-          search: {
-            enabled: true,
-            enabledTiers: ["A", "B"],
-            maxActorsPerRound: 4,
-            maxActorsByTier: { A: 2, B: 2 },
-            allowArchetypes: ["institution"],
-            denyArchetypes: [],
-            allowProfessions: ["journalist", "analyst"],
-            denyProfessions: [],
-            allowActors: [],
-            denyActors: [],
-            cutoffDate: "2026-03-01",
-            categories: "news",
-            defaultLanguage: "auto",
-            maxResultsPerQuery: 5,
-            maxQueriesPerActor: 2,
-            strictCutoff: true,
-            timeoutMs: 3000,
-          },
-          feed: {
-            embeddingEnabled: true,
-            embeddingWeight: 0.35,
-          },
-          assumptions: [
-            "Assumed the default X-style platform profile unless overridden by an explicit platform policy.",
-          ],
-          warnings: [],
-        })
-      );
-    }
-    if (options.feature === "shell") {
-      llm.setResponse("how many actors", "SELECT COUNT(*) as total FROM actors");
-      llm.setResponse("count actors", "SELECT COUNT(*) as total FROM actors");
-      llm.setResponse("list actors", "SELECT name, handle, cognition_tier FROM actors ORDER BY name LIMIT 10");
-      llm.setResponse("show actors", "SELECT name, handle, cognition_tier FROM actors ORDER BY name LIMIT 10");
-      llm.setResponse("how many posts", "SELECT COUNT(*) as total FROM posts");
-      llm.setResponse("count posts", "SELECT COUNT(*) as total FROM posts");
-      llm.setResponse("latest posts", "SELECT author_id, content, round_num FROM posts ORDER BY round_num DESC, id DESC LIMIT 10");
-      llm.setResponse("recent posts", "SELECT author_id, content, round_num FROM posts ORDER BY round_num DESC, id DESC LIMIT 10");
-    }
-    return llm;
-  }
-  return new LLMClient(config.providers);
-}
-
-function createPipelineMockLlm(): MockLLMClient {
-  const llm = new MockLLMClient();
-  llm.setResponse(
-    "Analyze the following document chunks and extract the ontology schema.",
-    JSON.stringify({
-      entity_types: [
-        { name: "person", description: "Individual actor", attributes: ["name", "role"] },
-        { name: "organization", description: "Institution or organization", attributes: ["name"] },
-      ],
-      edge_types: [
-        {
-          name: "opposes",
-          description: "Publicly opposes",
-          source_type: "person",
-          target_type: "organization",
-        },
-      ],
-    })
-  );
-  llm.setResponse(
-    "Extract all factual claims from the following text chunks.",
-    JSON.stringify({
-      claims: [
-        {
-          subject: "Elena Ruiz",
-          predicate: "opposes",
-          object: "Universidad Central",
-          confidence: 0.9,
-          valid_from: null,
-          valid_to: null,
-          topics: ["education", "protest"],
-        },
-      ],
-    })
-  );
-  llm.setResponse(
-    "Generate a social media profile for the following entity",
-    JSON.stringify({
-      personality: "A civically engaged account that comments on public issues with concise, evidence-oriented posts.",
-      bio: "Public affairs observer",
-      age: 32,
-      gender: null,
-      profession: "journalist",
-      region: "Bogota",
-      language: "es",
-      stance: "opposing",
-      sentiment_bias: -0.3,
-      activity_level: 0.7,
-      influence_weight: 0.6,
-      handle: "@sim_actor",
-      topics: [{ topic: "education", weight: 0.9 }],
-      beliefs: [{ topic: "education", sentiment: -0.4 }],
-    })
-  );
-  return llm;
-}
-
-function createPipelineLlm(config: SimConfig, mock?: boolean): LLMClient {
-  return mock ? createPipelineMockLlm() : new LLMClient(config.providers);
 }
 
 function ensureRunManifest(
@@ -454,6 +333,14 @@ export function buildInteractiveDesignBrief(context: string, request: string): s
   return `Context:\n${normalizedContext}\n\nSimulation request:\n${normalizedRequest}`;
 }
 
+function canStartAssistantOperator(config: SimConfig): boolean {
+  return (
+    config.assistant.enabled &&
+    config.assistant.permissions.readWorkspace &&
+    config.assistant.permissions.writeWorkspace
+  );
+}
+
 function buildInitConfig(answers: InitAnswers): SimConfig {
   const config = defaultConfig();
   config.simulation.totalHours = 24;
@@ -659,15 +546,24 @@ export async function runInitCommand(
       providerReady
     ) {
       io.stdout(`\n${renderReadyBanner()}`);
-      await runDesignCommand(
-        {
-          config: opts.output,
-          outConfig: "publicmachina.generated.config.yaml",
-          outSpec: "simulation.spec.json",
-        },
-        io,
-        prompt
-      );
+      if (canStartAssistantOperator(config)) {
+        await startAssistantOperator({
+          config,
+          configPath: opts.output,
+          io,
+          prompt,
+        });
+      } else {
+        await runDesignCommand(
+          {
+            config: opts.output,
+            outConfig: "publicmachina.generated.config.yaml",
+            outSpec: "simulation.spec.json",
+          },
+          io,
+          prompt
+        );
+      }
       return;
     }
 
@@ -771,7 +667,7 @@ async function runDesignCommand(
       );
     }
 
-    const llm = createCliLlm(config, { mock: opts.mock, feature: "design" });
+    const llm = createFeatureLlm(config, { mock: opts.mock, feature: "design" });
     const result = await designSimulationFromBrief(llm, brief, {
       docsPath: opts.docs,
       baseConfig: config,
@@ -1071,64 +967,38 @@ async function runPipelineCommand(
     config.simulation.seed = parseIntOption(opts.seed, "seed");
   }
 
-  const store = new SQLiteGraphStore(opts.db);
   const runId = opts.run ?? uuid();
-  const llm = createPipelineLlm(config, opts.mock);
+  const result = await executePipeline({
+    config,
+    dbPath: opts.db,
+    docsPath: opts.docs,
+    runId,
+    hypothesis: opts.hypothesis,
+    mock: opts.mock,
+  });
 
-  try {
-    const ingest = await ingestDirectory(store, opts.docs);
-    io.stdout(`Ingested ${ingest.newDocuments} documents (${ingest.totalChunks} chunks)\n`);
+  io.stdout(`Ingested documents from ${opts.docs}\n`);
+  io.stdout(`Generated ${result.actorsCreated} actors for run ${runId}\n`);
 
-    const ontology = await extractOntology(store, llm);
-    const graph = await buildKnowledgeGraph(store, llm);
-    io.stdout(`Analyzed corpus: ${ontology.claimsExtracted} claims, ${graph.entitiesCreated} entities\n`);
-
-    ensureRunManifest(store, runId, config, opts.hypothesis);
-    const profiles = await generateProfiles(
-      store,
-      llm,
-      {
-        runId,
-        hypothesis: opts.hypothesis,
-        platform: config.simulation.platform,
-      },
-      config
-    );
-    io.stdout(`Generated ${profiles.actorsCreated} actors for run ${runId}\n`);
-
-    const backend = opts.mock
-      ? new MockCognitionBackend()
-      : new DirectLLMBackend(llm, store, { runId, promptVersion: getPromptVersion() });
-
-    const result = await runSimulation({
-      store,
-      config,
-      backend,
+  if (opts.config && config.assistant.enabled) {
+    const workspace = resolveAssistantWorkspace(config, { configPath: opts.config });
+    bootstrapAssistantWorkspace(workspace, config);
+    recordSimulationHistory(workspace, {
+      title: opts.hypothesis ? `Run ${runId}: ${opts.hypothesis}` : `Run ${runId}`,
+      objective: opts.hypothesis ?? "Pipeline run",
+      hypothesis: opts.hypothesis ?? null,
+      brief: opts.hypothesis ?? `Pipeline run ${runId}`,
+      docsPath: opts.docs,
+      configPath: opts.config,
+      dbPath: opts.db,
       runId,
     });
-
-    if (opts.config && config.assistant.enabled) {
-      const workspace = resolveAssistantWorkspace(config, { configPath: opts.config });
-      bootstrapAssistantWorkspace(workspace, config);
-      recordSimulationHistory(workspace, {
-        title: opts.hypothesis ? `Run ${runId}: ${opts.hypothesis}` : `Run ${runId}`,
-        objective: opts.hypothesis ?? "Pipeline run",
-        hypothesis: opts.hypothesis ?? null,
-        brief: opts.hypothesis ?? `Pipeline run ${runId}`,
-        docsPath: opts.docs,
-        configPath: opts.config,
-        dbPath: opts.db,
-        runId,
-      });
-    }
-
-    io.stdout(`Pipeline ${result.status}\n`);
-    io.stdout(`  Run ID: ${result.runId}\n`);
-    io.stdout(`  Rounds: ${result.totalRounds}\n`);
-    io.stdout(`  Graph revision: ${graph.graphRevisionId}\n`);
-  } finally {
-    store.close();
   }
+
+  io.stdout(`Pipeline ${result.status}\n`);
+  io.stdout(`  Run ID: ${result.runId}\n`);
+  io.stdout(`  Rounds: ${result.totalRounds}\n`);
+  io.stdout(`  Graph revision: ${result.graphRevisionId}\n`);
 }
 
 function runInspectCommand(
@@ -1211,19 +1081,56 @@ export function createProgram(io: CliIO = defaultIO): Command {
     const prompt = createPromptSession();
     try {
       await ensureConfigFile(DEFAULT_CONFIG_PATH, io, prompt);
-      await runDesignCommand(
-        {
-          config: DEFAULT_CONFIG_PATH,
-          outConfig: "publicmachina.generated.config.yaml",
-          outSpec: "simulation.spec.json",
-        },
-        io,
-        prompt
-      );
+      const config = getConfig(DEFAULT_CONFIG_PATH);
+      if (canStartAssistantOperator(config)) {
+        await startAssistantOperator({
+          config,
+          configPath: DEFAULT_CONFIG_PATH,
+          io,
+          prompt,
+        });
+      } else {
+        await runDesignCommand(
+          {
+            config: DEFAULT_CONFIG_PATH,
+            outConfig: "publicmachina.generated.config.yaml",
+            outSpec: "simulation.spec.json",
+          },
+          io,
+          prompt
+        );
+      }
     } finally {
       prompt.close();
     }
   });
+
+  program
+    .command("assistant")
+    .description("Start the PublicMachina conversational operator")
+    .option("--config <path>", "config YAML file", DEFAULT_CONFIG_PATH)
+    .option("--mock", "use mock planner + mock pipeline services")
+    .action(async (opts) => {
+      await ensureConfigFile(opts.config, io);
+      const prompt = createPromptSession();
+      try {
+        const config = getConfig(opts.config);
+        if (!canStartAssistantOperator(config)) {
+          throw new Error(
+            "The conversational operator requires an enabled workspace with read/write permissions. Re-run `publicmachina setup`."
+          );
+        }
+        await startAssistantOperator({
+          config,
+          configPath: opts.config,
+          io,
+          prompt,
+          mock: opts.mock,
+        });
+      } finally {
+        prompt.close();
+      }
+    });
 
   // ═══════════════════════════════════════════════════════
   // SIMULATE
@@ -1457,7 +1364,7 @@ export function createProgram(io: CliIO = defaultIO): Command {
         if (!runId) throw new Error("No runs found in database.");
 
         const config = getConfig(opts.config);
-        const llm = createCliLlm(config, { mock: opts.mock, feature: "report" });
+        const llm = createFeatureLlm(config, { mock: opts.mock, feature: "report" });
         const result = await generateReport(store, runId, llm);
 
         if (opts.json) {
@@ -1548,7 +1455,7 @@ export function createProgram(io: CliIO = defaultIO): Command {
           shellCtx.assistantSession = createAssistantSession(workspace, "shell");
           shellCtx.onAssistantClear = async () => resetAssistantSession(workspace, "shell");
         }
-        shellCtx.llm = createCliLlm(config, { mock: opts.mock, feature: "shell" });
+        shellCtx.llm = createFeatureLlm(config, { mock: opts.mock, feature: "shell" });
         shellCtx.backend = opts.mock
           ? new MockCognitionBackend()
           : new DirectLLMBackend(
@@ -1562,7 +1469,7 @@ export function createProgram(io: CliIO = defaultIO): Command {
         shellCtx.onConfigUpdate = async (nextConfig) => {
           if (shellCtx.backend) await shellCtx.backend.shutdown();
           shellCtx.config = nextConfig;
-          shellCtx.llm = createCliLlm(nextConfig, { mock: opts.mock, feature: "shell" });
+          shellCtx.llm = createFeatureLlm(nextConfig, { mock: opts.mock, feature: "shell" });
           shellCtx.backend = opts.mock
             ? new MockCognitionBackend()
             : new DirectLLMBackend(

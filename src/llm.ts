@@ -59,7 +59,7 @@ const COST_PER_MILLION: Record<string, { input: number; output: number }> = {
   default: { input: 3.0, output: 15.0 },
 };
 
-function estimateCost(model: string, inputTokens: number, outputTokens: number): number {
+export function estimateModelCost(model: string, inputTokens: number, outputTokens: number): number {
   const pricing = COST_PER_MILLION[model] ?? COST_PER_MILLION.default;
   return (
     (inputTokens / 1_000_000) * pricing.input +
@@ -224,7 +224,7 @@ async function completeAnthropic(
     model: config.model,
     inputTokens,
     outputTokens,
-    costUsd: estimateCost(config.model, inputTokens, outputTokens),
+    costUsd: estimateModelCost(config.model, inputTokens, outputTokens),
     durationMs: Date.now() - startTime,
   };
 }
@@ -260,7 +260,7 @@ async function chatAnthropic(
     model: config.model,
     inputTokens,
     outputTokens,
-    costUsd: estimateCost(config.model, inputTokens, outputTokens),
+    costUsd: estimateModelCost(config.model, inputTokens, outputTokens),
     durationMs: Date.now() - startTime,
   };
 }
@@ -309,7 +309,7 @@ async function chatOpenAICompatible(
     model: config.model,
     inputTokens,
     outputTokens,
-    costUsd: estimateCost(config.model, inputTokens, outputTokens),
+    costUsd: estimateModelCost(config.model, inputTokens, outputTokens),
     durationMs: Date.now() - startTime,
   };
 }
