@@ -37,6 +37,10 @@ npm-debug.log*
 
 # Output directory (simulation results)
 output/
+publicmachina-workspace/
+publicmachina.config.yaml
+publicmachina.generated.config.yaml
+simulation.spec.json
 
 # Temporary files
 tmp/

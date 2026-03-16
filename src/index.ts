@@ -34,6 +34,18 @@ import type { RunManifest } from "./db.js";
 import { existsSync, writeFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 import {
+  type AssistantSimulationRecord,
+  addDurableMemory,
+  appendDailyNote,
+  bootstrapAssistantWorkspace,
+  listSimulationHistory,
+  recordSimulationHistory,
+  resolveAssistantWorkspace,
+  updateUserProfile,
+} from "./assistant-workspace.js";
+import { buildAssistantContext } from "./assistant-context.js";
+import { appendAssistantMessage, createAssistantSession } from "./assistant-session.js";
+import {
   SUPPORTED_PROVIDERS,
   describeConfiguredModel,
   getProviderCatalog,
@@ -319,9 +331,11 @@ interface InitAnswers {
   apiKeyValue?: string;
   outputDir: string;
   timezone: string;
+  workspaceDir: string;
+  workspaceReadWrite: boolean;
+  rememberConversations: boolean;
+  rememberSimulationHistory: boolean;
   searchEnabled: boolean;
-  searchEndpoint: string;
-  searchCutoffDate: string;
   advanced: boolean;
 }
 
@@ -418,6 +432,28 @@ async function askModel(
   }
 }
 
+function renderReadyBanner(): string {
+  return [
+    "╔══════════════════════════════════════════════════════╗",
+    "║                                                      ║",
+    "║   ◉ Wake up!                                         ║",
+    "║   PublicMachina ready to forecast.                  ║",
+    "║                                                      ║",
+    "║   The public sphere is now simulated.               ║",
+    "║   Alternate realities are standing by.              ║",
+    "║                                                      ║",
+    "╚══════════════════════════════════════════════════════╝",
+    "",
+  ].join("\n");
+}
+
+export function buildInteractiveDesignBrief(context: string, request: string): string {
+  const normalizedContext = context.trim();
+  const normalizedRequest = request.trim();
+  if (!normalizedContext) return normalizedRequest;
+  return `Context:\n${normalizedContext}\n\nSimulation request:\n${normalizedRequest}`;
+}
+
 function buildInitConfig(answers: InitAnswers): SimConfig {
   const config = defaultConfig();
   config.simulation.totalHours = 24;
@@ -425,13 +461,17 @@ function buildInitConfig(answers: InitAnswers): SimConfig {
   config.output.dir = answers.outputDir;
   config.output.format = "markdown";
   config.search.enabled = answers.searchEnabled;
-  config.search.endpoint = answers.searchEndpoint;
-  config.search.cutoffDate = answers.searchCutoffDate;
   config.providers.default = createProviderConfig(answers.provider, answers.simulationModel, {
     apiKeyEnv: answers.apiKeyEnv,
     ...(answers.baseUrl ? { baseUrl: answers.baseUrl } : {}),
   });
   config.providers.overrides = {};
+  config.assistant.workspaceDir = answers.workspaceDir;
+  config.assistant.enabled = answers.workspaceReadWrite;
+  config.assistant.permissions.readWorkspace = answers.workspaceReadWrite;
+  config.assistant.permissions.writeWorkspace = answers.workspaceReadWrite;
+  config.assistant.permissions.rememberConversations = answers.rememberConversations;
+  config.assistant.permissions.rememberSimulationHistory = answers.rememberSimulationHistory;
 
   if (answers.reportModel && answers.reportModel !== answers.simulationModel) {
     config.providers = setRoleProviderSelection(config.providers, "report", {
@@ -446,7 +486,7 @@ function buildInitConfig(answers: InitAnswers): SimConfig {
 }
 
 export async function runInitCommand(
-  opts: { output: string; yes?: boolean },
+  opts: { output: string; yes?: boolean; nextStep?: "none" | "design" },
   io: CliIO,
   promptSession?: PromptSession
 ): Promise<void> {
@@ -471,35 +511,71 @@ export async function runInitCommand(
     apiKeyValue: undefined,
     outputDir: "./output",
     timezone: defaultConfig().simulation.timezone,
+    workspaceDir: defaultConfig().assistant.workspaceDir,
+    workspaceReadWrite: true,
+    rememberConversations: defaultConfig().assistant.permissions.rememberConversations,
+    rememberSimulationHistory: defaultConfig().assistant.permissions.rememberSimulationHistory,
     searchEnabled: false,
-    searchEndpoint: defaultConfig().search.endpoint,
-    searchCutoffDate: defaultConfig().search.cutoffDate,
     advanced: false,
   };
 
   let answers: InitAnswers = defaults;
   let prompt = promptSession;
   let createdPrompt = false;
+  const nextStep = opts.nextStep ?? "none";
+  try {
+    if (!opts.yes && (process.stdin.isTTY || promptSession)) {
+      if (!prompt) {
+        prompt = createPromptSession();
+        createdPrompt = true;
+      }
 
-  if (!opts.yes && (process.stdin.isTTY || promptSession)) {
-    if (!prompt) {
-      prompt = createPromptSession();
-      createdPrompt = true;
-    }
-    try {
       io.stdout("PublicMachina setup\n");
       io.stdout("This wizard configures a real provider first. Mock mode remains available for demos and CI.\n\n");
 
       const provider = await askProvider(prompt, defaults.provider);
       const providerEntry = getProviderCatalog(provider);
-      const simulationModel = await askModel(prompt, provider, defaults.simulationModel);
+      const providerDefaultModel = normalizeModelId(
+        provider,
+        provider === defaults.provider
+          ? defaults.simulationModel
+          : getRecommendedModel(provider).id
+      );
+      const simulationModel = await askModel(prompt, provider, providerDefaultModel);
       const advanced = await askYesNo(prompt, "Advanced setup (separate report model)?", false);
       const reportModel = advanced
         ? await askModel(prompt, provider, simulationModel)
         : simulationModel;
       const apiKeyValue = (await (prompt.askSecret?.(`Paste your ${providerEntry.label} API key now (leave blank to skip)`)
         ?? prompt.ask(`Paste your ${providerEntry.label} API key now (leave blank to skip)`))).trim();
-      const searchEnabled = await askYesNo(prompt, "Enable SearXNG web search now?", defaults.searchEnabled);
+      const searchEnabled = await askYesNo(
+        prompt,
+        "Do you want some agents in your simulations to be able to search the internet?",
+        defaults.searchEnabled
+      );
+      const workspaceDir = await prompt.ask(
+        "Which folder should I use as your PublicMachina workspace?",
+        defaults.workspaceDir
+      );
+      const workspaceReadWrite = await askYesNo(
+        prompt,
+        "May I read and write simulation files in that workspace?",
+        defaults.workspaceReadWrite
+      );
+      const rememberConversations = workspaceReadWrite
+        ? await askYesNo(
+            prompt,
+            "Should I remember our conversations in that workspace?",
+            defaults.rememberConversations
+          )
+        : false;
+      const rememberSimulationHistory = workspaceReadWrite
+        ? await askYesNo(
+            prompt,
+            "Should I remember previous simulations in that workspace?",
+            defaults.rememberSimulationHistory
+          )
+        : false;
 
       answers = {
         provider,
@@ -510,66 +586,97 @@ export async function runInitCommand(
         apiKeyValue: apiKeyValue || undefined,
         outputDir: defaults.outputDir,
         timezone: defaults.timezone,
+        workspaceDir,
+        workspaceReadWrite,
+        rememberConversations,
+        rememberSimulationHistory,
         searchEnabled,
-        searchEndpoint: searchEnabled
-          ? await prompt.ask("SearXNG endpoint", defaults.searchEndpoint)
-          : defaults.searchEndpoint,
-        searchCutoffDate: searchEnabled
-          ? await prompt.ask("Search cutoff date (ISO)", defaults.searchCutoffDate)
-          : defaults.searchCutoffDate,
         advanced,
       };
-    } finally {
-      if (createdPrompt) {
-        prompt.close();
+    }
+
+    if (answers.apiKeyValue) {
+      upsertEnvVar(answers.apiKeyEnv, answers.apiKeyValue);
+    }
+
+    const config = buildInitConfig(answers);
+    saveConfig(opts.output, config);
+    if (config.assistant.enabled) {
+      bootstrapAssistantWorkspace(resolveAssistantWorkspace(config, { configPath: opts.output }), config);
+    }
+    io.stdout(`Created ${opts.output}\n`);
+
+    const envVarExists = Boolean(process.env[answers.apiKeyEnv]);
+    let providerReady = envVarExists;
+    io.stdout(
+      envVarExists
+        ? `  [PASS] ${answers.apiKeyEnv} is set\n`
+        : `  [WARN] ${answers.apiKeyEnv} is not set yet\n`
+    );
+    if (answers.searchEnabled) {
+      io.stdout(
+        `  [INFO] Internet search capability enabled (default endpoint: ${config.search.endpoint})\n`
+      );
+    }
+    if (config.assistant.enabled) {
+      io.stdout(
+        `  [PASS] Assistant workspace ready at ${config.assistant.workspaceDir}\n`
+      );
+    } else {
+      io.stdout("  [WARN] Assistant workspace memory disabled\n");
+    }
+
+    if (envVarExists) {
+      try {
+        await validateProviderConnection({
+          provider: answers.provider,
+          sdk: answers.provider,
+          model: answers.simulationModel,
+          apiKeyEnv: answers.apiKeyEnv,
+          baseUrl: answers.baseUrl,
+        });
+        io.stdout(
+          `  [PASS] ${getProviderCatalog(answers.provider).label} validated with ${describeConfiguredModel(answers.provider, answers.simulationModel)}\n`
+        );
+      } catch (err) {
+        providerReady = false;
+        io.stderr(`  [WARN] Provider validation failed: ${formatErrorMessage(err)}\n`);
       }
     }
-  }
 
-  if (answers.apiKeyValue) {
-    upsertEnvVar(answers.apiKeyEnv, answers.apiKeyValue);
-  }
-
-  const config = buildInitConfig(answers);
-  saveConfig(opts.output, config);
-  io.stdout(`Created ${opts.output}\n`);
-
-  const envVarExists = Boolean(process.env[answers.apiKeyEnv]);
-  io.stdout(
-    envVarExists
-      ? `  [PASS] ${answers.apiKeyEnv} is set\n`
-      : `  [WARN] ${answers.apiKeyEnv} is not set yet\n`
-  );
-  if (answers.searchEnabled) {
-    io.stdout(`  [INFO] Web search enabled at ${answers.searchEndpoint}\n`);
-  }
-
-  if (envVarExists) {
     try {
-      await validateProviderConnection({
-        provider: answers.provider,
-        sdk: answers.provider,
-        model: answers.simulationModel,
-        apiKeyEnv: answers.apiKeyEnv,
-        baseUrl: answers.baseUrl,
-      });
-      io.stdout(
-        `  [PASS] ${getProviderCatalog(answers.provider).label} validated with ${describeConfiguredModel(answers.provider, answers.simulationModel)}\n`
-      );
+      const testStore = new SQLiteGraphStore(":memory:");
+      testStore.close();
+      io.stdout("  [PASS] SQLite open/create check\n");
     } catch (err) {
-      io.stderr(`  [WARN] Provider validation failed: ${formatErrorMessage(err)}\n`);
+      io.stderr(`  [FAIL] SQLite check: ${formatErrorMessage(err)}\n`);
+    }
+
+    if (
+      nextStep === "design" &&
+      !opts.yes &&
+      prompt &&
+      providerReady
+    ) {
+      io.stdout(`\n${renderReadyBanner()}`);
+      await runDesignCommand(
+        {
+          config: opts.output,
+          outConfig: "publicmachina.generated.config.yaml",
+          outSpec: "simulation.spec.json",
+        },
+        io,
+        prompt
+      );
+      return;
+    }
+
+    io.stdout('Next: run "publicmachina doctor" to validate the full setup.\n');
+  } finally {
+    if (createdPrompt) {
+      prompt?.close();
     }
   }
-
-  try {
-    const testStore = new SQLiteGraphStore(":memory:");
-    testStore.close();
-    io.stdout("  [PASS] SQLite open/create check\n");
-  } catch (err) {
-    io.stderr(`  [FAIL] SQLite check: ${formatErrorMessage(err)}\n`);
-  }
-
-  io.stdout('Next: run "publicmachina doctor" to validate the full setup.\n');
 }
 
 async function runDesignCommand(
@@ -589,6 +696,15 @@ async function runDesignCommand(
   let prompt = promptSession;
   const interactive = !opts.yes && (Boolean(promptSession) || process.stdin.isTTY);
   let createdPrompt = false;
+  const workspace = config.assistant.enabled
+    ? resolveAssistantWorkspace(config, { configPath: opts.config })
+    : null;
+  if (workspace && config.assistant.permissions.readWorkspace && config.assistant.permissions.writeWorkspace) {
+    bootstrapAssistantWorkspace(workspace, config);
+  }
+  const session = workspace && config.assistant.permissions.rememberConversations
+    ? createAssistantSession(workspace)
+    : null;
 
   if (!prompt && interactive) {
     prompt = createPromptSession();
@@ -597,11 +713,62 @@ async function runDesignCommand(
 
   try {
     let brief = opts.brief?.trim() ?? "";
+    let preferredName = "there";
+    let userContext = "";
     if (!brief) {
       if (!prompt) {
         throw new Error('Natural-language brief required. Pass --brief or run "publicmachina design" interactively.');
       }
-      brief = await prompt.ask("Describe the simulation you want to design");
+      io.stdout("Hello. I'm PublicMachina.\n");
+      if (session) appendAssistantMessage(session, "assistant", "Hello. I'm PublicMachina.");
+      const ready = await askYesNo(prompt, "Are you ready to simulate?", true);
+      if (session) appendAssistantMessage(session, "user", ready ? "Yes, I am ready to simulate." : "No, not yet.");
+      if (!ready) {
+        io.stdout("Whenever you're ready, run PublicMachina again and we'll start there.\n");
+        if (session) {
+          appendAssistantMessage(
+            session,
+            "assistant",
+            "Whenever you're ready, run PublicMachina again and we'll start there."
+          );
+        }
+        return;
+      }
+      preferredName = (await prompt.ask("What should I call you?", "there")).trim() || "there";
+      if (session) appendAssistantMessage(session, "user", `Call me ${preferredName}.`);
+      io.stdout(`Good to meet you, ${preferredName}.\n`);
+      if (session) appendAssistantMessage(session, "assistant", `Good to meet you, ${preferredName}.`);
+      if (workspace) {
+        updateUserProfile(workspace, { preferredName });
+      }
+      const context = await prompt.ask(
+        "What context should I keep in mind? You can mention the domain, region, organization, or objective.",
+        ""
+      );
+      userContext = context.trim();
+      if (session && userContext) {
+        appendAssistantMessage(session, "user", `Context: ${userContext}`);
+      }
+      const request = await prompt.ask(`What would you like to simulate today, ${preferredName}?`);
+      if (session) appendAssistantMessage(session, "user", request);
+      if (workspace) {
+        updateUserProfile(workspace, {
+          lastContext: userContext || null,
+          ...(userContext ? { addNote: userContext } : {}),
+        });
+      }
+      const assistantContext = workspace
+        ? buildAssistantContext(workspace, config, `${context}\n${request}`)
+        : null;
+      brief = buildInteractiveDesignBrief(
+        [
+          assistantContext?.summary ? `Operator workspace context:\n${assistantContext.summary}` : "",
+          context.trim(),
+        ]
+          .filter(Boolean)
+          .join("\n\n"),
+        request
+      );
     }
 
     const llm = createCliLlm(config, { mock: opts.mock, feature: "design" });
@@ -611,6 +778,7 @@ async function runDesignCommand(
     });
 
     io.stdout(result.preview);
+    if (session) appendAssistantMessage(session, "assistant", result.preview);
 
     const outputsExist = existsSync(opts.outConfig) || existsSync(opts.outSpec);
     if (outputsExist && !opts.yes) {
@@ -645,6 +813,42 @@ async function runDesignCommand(
 
     io.stdout(`Wrote ${opts.outSpec}\n`);
     io.stdout(`Wrote ${opts.outConfig}\n`);
+    if (session) {
+      appendAssistantMessage(
+        session,
+        "assistant",
+        `I wrote ${opts.outSpec} and ${opts.outConfig} for ${result.spec.title}.`
+      );
+    }
+
+    if (workspace) {
+      const contextSummary = userContext || null;
+      recordSimulationHistory(workspace, {
+        title: result.spec.title,
+        objective: result.spec.objective,
+        hypothesis: result.spec.hypothesis,
+        brief,
+        context: contextSummary,
+        specPath: opts.outSpec,
+        configPath: opts.outConfig,
+        docsPath: result.spec.docsPath,
+        tags: result.spec.focusActors,
+      });
+      appendDailyNote(workspace, {
+        title: `Simulation design — ${result.spec.title}`,
+        lines: [
+          `User: ${preferredName === "there" ? "unknown" : preferredName}`,
+          `Objective: ${result.spec.objective}`,
+          `Hypothesis: ${result.spec.hypothesis ?? "not provided"}`,
+          `Focus actors: ${result.spec.focusActors.join(", ") || "none"}`,
+        ],
+      });
+      addDurableMemory(workspace, {
+        kind: "simulation",
+        summary: `Designed simulation "${result.spec.title}" with objective: ${result.spec.objective}`,
+        tags: result.spec.focusActors,
+      });
+    }
 
     const nextParts = [
       "node dist/index.js run",
@@ -903,6 +1107,21 @@ async function runPipelineCommand(
       runId,
     });
 
+    if (opts.config && config.assistant.enabled) {
+      const workspace = resolveAssistantWorkspace(config, { configPath: opts.config });
+      bootstrapAssistantWorkspace(workspace, config);
+      recordSimulationHistory(workspace, {
+        title: opts.hypothesis ? `Run ${runId}: ${opts.hypothesis}` : `Run ${runId}`,
+        objective: opts.hypothesis ?? "Pipeline run",
+        hypothesis: opts.hypothesis ?? null,
+        brief: opts.hypothesis ?? `Pipeline run ${runId}`,
+        docsPath: opts.docs,
+        configPath: opts.config,
+        dbPath: opts.db,
+        runId,
+      });
+    }
+
     io.stdout(`Pipeline ${result.status}\n`);
     io.stdout(`  Run ID: ${result.runId}\n`);
     io.stdout(`  Rounds: ${result.totalRounds}\n`);
@@ -960,6 +1179,16 @@ function printBanner(io: CliIO): void {
   io.stdout("\n");
 }
 
+function formatHistoryRecord(record: AssistantSimulationRecord): string {
+  return [
+    `${record.title}`,
+    `  Created: ${record.createdAt}`,
+    `  Objective: ${record.objective ?? "not captured"}`,
+    `  Hypothesis: ${record.hypothesis ?? "not captured"}`,
+    `  Workspace: ${record.workspaceDir}`,
+  ].join("\n");
+}
+
 export function createProgram(io: CliIO = defaultIO): Command {
   const program = new Command()
     .name("publicmachina")
@@ -982,7 +1211,6 @@ export function createProgram(io: CliIO = defaultIO): Command {
     const prompt = createPromptSession();
     try {
       await ensureConfigFile(DEFAULT_CONFIG_PATH, io, prompt);
-      io.stdout("Setup complete. Describe the simulation you want to design.\n");
       await runDesignCommand(
         {
           config: DEFAULT_CONFIG_PATH,
@@ -1252,6 +1480,34 @@ export function createProgram(io: CliIO = defaultIO): Command {
       }
     });
 
+  program
+    .command("history")
+    .description("Show previous assistant-tracked simulations from the workspace")
+    .option("--config <path>", "config YAML file", DEFAULT_CONFIG_PATH)
+    .option("--query <text>", "filter simulations by keyword")
+    .option("--json", "output raw JSON")
+    .action((opts) => {
+      const config = getConfig(opts.config);
+      if (!config.assistant.enabled) {
+        io.stdout("Assistant workspace memory is disabled in this config.\n");
+        return;
+      }
+      const workspace = resolveAssistantWorkspace(config, { configPath: opts.config });
+      bootstrapAssistantWorkspace(workspace, config);
+      const history = listSimulationHistory(workspace, { query: opts.query, limit: 20 });
+      if (opts.json) {
+        io.stdout(`${JSON.stringify(history, null, 2)}\n`);
+        return;
+      }
+      if (history.length === 0) {
+        io.stdout("No previous simulations found in this workspace.\n");
+        return;
+      }
+      for (const record of history) {
+        io.stdout(`${formatHistoryRecord(record)}\n\n`);
+      }
+    });
+
   // ═══════════════════════════════════════════════════════
   // SHELL
   // ═══════════════════════════════════════════════════════
@@ -1347,7 +1603,7 @@ export function createProgram(io: CliIO = defaultIO): Command {
     .option("--output <path>", "config file output path", "publicmachina.config.yaml")
     .option("--yes", "write defaults without interactive prompts")
     .action(async (opts) => {
-      await runInitCommand(opts, io);
+      await runInitCommand({ ...opts, nextStep: "design" }, io);
     });
 
   // ═══════════════════════════════════════════════════════
@@ -1402,6 +1658,20 @@ export function createProgram(io: CliIO = defaultIO): Command {
             } catch (err) {
               io.stdout(
                 `  [FAIL] search: SearXNG not reachable at ${config.search.endpoint} (${formatErrorMessage(err)})\n`
+              );
+              failed++;
+            }
+          }
+
+          if (config.assistant.enabled) {
+            try {
+              const workspace = resolveAssistantWorkspace(config, { configPath: opts.config });
+              bootstrapAssistantWorkspace(workspace, config);
+              io.stdout(`  [PASS] assistant: workspace ready at ${workspace.rootDir}\n`);
+              passed++;
+            } catch (err) {
+              io.stdout(
+                `  [FAIL] assistant: workspace bootstrap failed (${formatErrorMessage(err)})\n`
               );
               failed++;
             }

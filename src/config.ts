@@ -28,6 +28,7 @@ export interface SimConfig {
   simulation: SimulationConfig;
   cognition: CognitionConfig;
   providers: ProvidersConfig;
+  assistant: AssistantConfig;
   platform: PlatformPolicyConfig;
   search: SearchConfig;
   feed: FeedConfig;
@@ -148,6 +149,26 @@ export interface OutputConfig {
   format: "markdown" | "json" | "both";
 }
 
+export interface AssistantConfig {
+  enabled: boolean;
+  workspaceDir: string;
+  permissions: AssistantPermissionsConfig;
+  memory: AssistantMemoryConfig;
+}
+
+export interface AssistantPermissionsConfig {
+  readWorkspace: boolean;
+  writeWorkspace: boolean;
+  rememberConversations: boolean;
+  rememberSimulationHistory: boolean;
+}
+
+export interface AssistantMemoryConfig {
+  recentSessionMessages: number;
+  recentDailyNotes: number;
+  relevantSimulationLimit: number;
+}
+
 /** ActivationConfig — derived by engine.ts from SimConfig */
 export interface ActivationConfig {
   peakHours: number[];
@@ -198,6 +219,21 @@ const DEFAULTS: SimConfig = {
       apiKeyEnv: "ANTHROPIC_API_KEY",
     },
     overrides: {},
+  },
+  assistant: {
+    enabled: true,
+    workspaceDir: "./publicmachina-workspace",
+    permissions: {
+      readWorkspace: true,
+      writeWorkspace: true,
+      rememberConversations: true,
+      rememberSimulationHistory: true,
+    },
+    memory: {
+      recentSessionMessages: 12,
+      recentDailyNotes: 2,
+      relevantSimulationLimit: 3,
+    },
   },
   platform: structuredClone(DEFAULT_PLATFORM_POLICY),
   search: {
@@ -396,6 +432,34 @@ function validateConfig(config: SimConfig): void {
         new ConfigError("baseUrl must start with http:// or https://", `providers.${role}.baseUrl`)
       );
     }
+  }
+
+  if (!config.assistant.workspaceDir.trim()) {
+    errors.push(new ConfigError("workspaceDir must not be empty", "assistant.workspaceDir"));
+  }
+  if (config.assistant.memory.recentSessionMessages < 1) {
+    errors.push(
+      new ConfigError(
+        "recentSessionMessages must be >= 1",
+        "assistant.memory.recentSessionMessages"
+      )
+    );
+  }
+  if (config.assistant.memory.recentDailyNotes < 0) {
+    errors.push(
+      new ConfigError(
+        "recentDailyNotes must be >= 0",
+        "assistant.memory.recentDailyNotes"
+      )
+    );
+  }
+  if (config.assistant.memory.relevantSimulationLimit < 1) {
+    errors.push(
+      new ConfigError(
+        "relevantSimulationLimit must be >= 1",
+        "assistant.memory.relevantSimulationLimit"
+      )
+    );
   }
 
   // Simulation

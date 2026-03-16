@@ -46,6 +46,10 @@ describe("config.ts", () => {
       expect(config.providers.default.sdk).toBe("anthropic");
       expect(config.providers.default.model).toBe("claude-sonnet-4-6");
       expect(resolveProviderConfig(config.providers, "analysis").model).toBe("claude-sonnet-4-6");
+      expect(config.assistant.enabled).toBe(true);
+      expect(config.assistant.workspaceDir).toBe("./publicmachina-workspace");
+      expect(config.assistant.permissions.rememberConversations).toBe(true);
+      expect(config.assistant.memory.relevantSimulationLimit).toBe(3);
 
       expect(config.feed.size).toBe(20);
       expect(config.feed.recencyWeight + config.feed.popularityWeight + config.feed.relevanceWeight).toBeCloseTo(1.0);

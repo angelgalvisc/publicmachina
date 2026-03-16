@@ -14,8 +14,9 @@ import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
 import { SQLiteGraphStore } from "../src/db.js";
 import type { ActorRow } from "../src/db.js";
-import { runCli, runInitCommand } from "../src/index.js";
+import { buildInteractiveDesignBrief, runCli, runInitCommand } from "../src/index.js";
 import { loadConfig } from "../src/config.js";
+import { bootstrapAssistantWorkspace, recordSimulationHistory, resolveAssistantWorkspace } from "../src/assistant-workspace.js";
 import { resolveProviderConfig } from "../src/provider-selection.js";
 import { updateRound } from "../src/telemetry.js";
 
@@ -416,11 +417,18 @@ describe("CLI init", () => {
       {
         ask: async (question, defaultValue) => {
           if (question.includes("Choose provider")) return "openai";
-          if (question.includes("Choose OpenAI model")) return "GPT-5 mini";
+          if (question.includes("Choose OpenAI model")) {
+            expect(defaultValue).toBe("GPT-5.4");
+            return "GPT-5 mini";
+          }
           if (question.includes("Advanced setup")) return "no";
-          if (question.includes("Enable SearXNG web search")) return "yes";
-          if (question.includes("SearXNG endpoint")) return "http://localhost:8888";
-          if (question.includes("Search cutoff date")) return "2026-03-01";
+          if (question.includes("search the internet")) return "yes";
+          if (question.includes("Which folder should I use as your PublicMachina workspace")) {
+            return "./operator-workspace";
+          }
+          if (question.includes("May I read and write simulation files")) return "yes";
+          if (question.includes("Should I remember our conversations")) return "yes";
+          if (question.includes("Should I remember previous simulations")) return "yes";
           return defaultValue ?? "";
         },
         askSecret: async () => "",
@@ -436,10 +444,27 @@ describe("CLI init", () => {
     expect(resolveProviderConfig(config.providers, "simulation").model).toBe("gpt-5-mini-2025-08-07");
     expect(contents).toContain('dir: "./output"');
     expect(contents).toContain("enabled: true");
-    expect(contents).toContain('cutoffDate: "2026-03-01"');
+    expect(contents).toContain('cutoffDate: "9999-12-31"');
+    expect(contents).toContain("assistant:");
+    expect(contents).toContain('workspaceDir: "./operator-workspace"');
     expect(contents).toContain("search:");
     expect(contents).toContain('endpoint: "http://localhost:8888"');
     expect(contents).not.toContain("sk-");
+  });
+});
+
+describe("interactive design brief", () => {
+  it("combines optional context with the simulation request", () => {
+    expect(
+      buildInteractiveDesignBrief(
+        "We are modeling a Colombian mayoral crisis with national media spillover.",
+        "Simulate how journalists, city officials, and protesters react over 12 rounds."
+      )
+    ).toContain("Context:");
+
+    expect(buildInteractiveDesignBrief("", "Simulate a product recall.")).toBe(
+      "Simulate a product recall."
+    );
   });
 });
 
@@ -576,6 +601,50 @@ describe("CLI doctor", () => {
       });
       delete process.env.TEST_PROVIDER_KEY;
     }
+  });
+});
+
+describe("CLI history", () => {
+  it("prints assistant-tracked simulations from the configured workspace", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "publicmachina-history-"));
+    tempDirs.push(dir);
+    const configPath = join(dir, "publicmachina.config.yaml");
+    writeFileSync(
+      configPath,
+      [
+        "assistant:",
+        "  enabled: true",
+        '  workspaceDir: "./workspace"',
+        "providers:",
+        "  default:",
+        '    provider: "openai"',
+        '    model: "gpt-5.4-2026-03-05"',
+        '    apiKeyEnv: "OPENAI_API_KEY"',
+        "  overrides: {}",
+        "",
+      ].join("\n"),
+      "utf-8"
+    );
+
+    const config = loadConfig(configPath);
+    const workspace = resolveAssistantWorkspace(config, { configPath });
+    bootstrapAssistantWorkspace(workspace, config);
+    recordSimulationHistory(workspace, {
+      title: "Election rumor stress test",
+      objective: "Compare media amplification and institutional response",
+      hypothesis: "Rumors outrun corrections in the first 6 rounds",
+      brief: "Simulate journalists, election observers, and party spokespeople.",
+      tags: ["election"],
+    });
+
+    const capture = makeIO();
+    await runCli(
+      ["node", "publicmachina", "history", "--config", configPath],
+      capture.io
+    );
+
+    expect(capture.getStdout()).toContain("Election rumor stress test");
+    expect(capture.getStdout()).toContain("Rumors outrun corrections");
   });
 });
 
