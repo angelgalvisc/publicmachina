@@ -61,6 +61,16 @@ function setupTestStore(): {
   store.addActorBelief(actorId, "climate", -0.5);
   store.addActorTopic(actorId, "education", 0.8);
   store.addActorTopic(actorId, "climate", 0.6);
+  store.addActorMemory({
+    id: "memory-1",
+    run_id: runId,
+    actor_id: actorId,
+    round_num: 3,
+    kind: "reflection",
+    summary: "You decided to challenge the official narrative after repeated criticism.",
+    salience: 0.9,
+    topic: "education",
+  });
   return { store, runId, actorId };
 }
 
@@ -141,12 +151,14 @@ describe("exportAgent", () => {
 
     const result = exportAgent(store, runId, actorId, outDir);
 
-    expect(result.files).toHaveLength(7);
+    expect(result.files).toHaveLength(8);
+    expect(result.memoriesExported).toBe(1);
     const expectedFiles = [
       "claw.yaml",
       "actor_state.json",
       "beliefs.json",
       "topics.json",
+      "memories.json",
       "provenance.json",
       "persona.md",
       "manifest.meta.json",
@@ -194,6 +206,21 @@ describe("exportAgent", () => {
     expect(education.sentiment).toBe(0.3);
     expect(climate).toBeDefined();
     expect(climate.sentiment).toBe(-0.5);
+  });
+
+  it("exports actor memories when present", () => {
+    const { store, runId, actorId } = setupTestStore();
+    const outDir = join(makeTempDir(), "export");
+
+    exportAgent(store, runId, actorId, outDir);
+
+    const memories = JSON.parse(
+      readFileSync(join(outDir, "memories.json"), "utf-8"),
+    );
+    expect(memories).toHaveLength(1);
+    expect(memories[0].kind).toBe("reflection");
+    expect(memories[0].summary).toContain("official narrative");
+    expect(memories[0].topic).toBe("education");
   });
 
   it("scrubs secrets from exported JSON", () => {
@@ -272,6 +299,7 @@ describe("importAgent", () => {
     expect(result.name).toBe("Test Actor");
     expect(result.beliefsImported).toBe(2);
     expect(result.topicsImported).toBe(2);
+    expect(result.memoriesImported).toBe(1);
 
     // Verify the actor exists in the store
     const importedActor = store.getActor(result.actorId);
@@ -287,6 +315,11 @@ describe("importAgent", () => {
     const educationBelief = context.beliefs.find((b) => b.topic === "education");
     expect(educationBelief).toBeDefined();
     expect(educationBelief!.sentiment).toBe(0.3);
+
+    const memories = store.getActorMemories(result.actorId, importRunId, 10);
+    expect(memories).toHaveLength(1);
+    expect(memories[0].summary).toContain("official narrative");
+    expect(memories[0].topic).toBe("education");
   });
 
   it("generates new UUID for imported actor", () => {
@@ -329,5 +362,28 @@ describe("importAgent", () => {
     expect(() => importAgent(store, "test-run", bundleDir)).toThrow(
       "Missing required file: claw.yaml",
     );
+  });
+
+  it("imports older bundles that do not include memories.json", () => {
+    const { store, runId, actorId } = setupTestStore();
+    const outDir = join(makeTempDir(), "export");
+
+    exportAgent(store, runId, actorId, outDir);
+    rmSync(join(outDir, "memories.json"));
+
+    const importRunId = "import-run-legacy";
+    store.createRun({
+      id: importRunId,
+      started_at: new Date().toISOString(),
+      seed: 55,
+      config_snapshot: "{}",
+      graph_revision_id: "import-test-legacy",
+      status: "completed",
+      total_rounds: 5,
+    });
+
+    const result = importAgent(store, importRunId, outDir);
+    expect(result.memoriesImported).toBe(0);
+    expect(store.getActorMemories(result.actorId, importRunId, 10)).toHaveLength(0);
   });
 });

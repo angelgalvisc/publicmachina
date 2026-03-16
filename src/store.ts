@@ -161,6 +161,7 @@ export interface GraphStore {
   updateNarrative(id: string, updates: Partial<NarrativeRow>): void;
   getNarrativesByRun(runId: string): NarrativeRow[];
   addActorMemory(memory: ActorMemoryRow): void;
+  listActorMemories(actorId: string, runId: string): ActorMemoryRow[];
   getActorMemories(
     actorId: string,
     runId: string,
@@ -1368,6 +1369,16 @@ export class SQLiteGraphStore implements GraphStore {
         memory.source_post_id ?? null,
         memory.source_actor_id ?? null
       );
+  }
+
+  listActorMemories(actorId: string, runId: string): ActorMemoryRow[] {
+    return this.db
+      .prepare(
+        `SELECT * FROM actor_memories
+         WHERE actor_id = ? AND run_id = ?
+         ORDER BY round_num ASC, salience DESC`
+      )
+      .all(actorId, runId) as ActorMemoryRow[];
   }
 
   getActorMemories(

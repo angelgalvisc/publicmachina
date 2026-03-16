@@ -1766,7 +1766,7 @@ NullClaw integration deferred — actors only need structured LLM completions, n
 | `interview.ts` | P2 | ✅ Phase 7 |
 | `shell.ts` | P2 | ✅ Phase 8 |
 
-**Phases 1-8 complete, plus Phase 9A conservative time acceleration and the Phase 10-13 foundation** (`403/403` tests across 27 test files). The runtime now includes:
+**Phases 1-8 complete, plus Phase 9A conservative time acceleration and the Phase 10-13 foundation** (`405/405` tests across 27 test files). The runtime now includes:
 
 - expanded actions: `quote`, `unfollow`, `unlike`, `delete`, `mute`, `block`, `report`
 - deterministic platform moderation based on report thresholds

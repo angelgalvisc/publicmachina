@@ -15,7 +15,7 @@
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg?style=flat-square)](LICENSE)
 [![Node](https://img.shields.io/badge/Node-%3E%3D18-339933?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.5+-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org)
-[![Tests](https://img.shields.io/badge/Tests-403_passing-brightgreen?style=flat-square)]()
+[![Tests](https://img.shields.io/badge/Tests-405_passing-brightgreen?style=flat-square)]()
 [![CKP](https://img.shields.io/badge/CKP-v0.2.6-orange?style=flat-square)](https://github.com/angelgalvisc/clawkernel)
 
 ---
@@ -47,7 +47,7 @@ This makes SeldonClaw useful as both a scenario lab and an operator tool: you ca
 - A full simulated run with actors, posts, rounds, exposures, narratives, and telemetry
 - A generated `simulation.spec.json` and executable config when you use natural-language design
 - Reports, actor interviews, and shell-based analysis tools
-- CKP-exportable/importable agents and a reproducible audit trail
+- Reusable actor bundles plus a reproducible audit trail
 
 ## Why It Exists
 
@@ -72,7 +72,7 @@ At the operator level, it gives researchers and builders a way to design simulat
 - **Feed algorithms** — Chronological, heuristic, trace-aware, embedding, and hybrid ranking modes with out-of-network mix control
 - **Negative social dynamics** — Mutes and blocks alter feed visibility and cross-actor propagation; report actions can trigger deterministic platform moderation
 - **Idle fast-forward** — Quiet tails with no recent posts, no events, and no activated actors can be compressed into audited skipped spans
-- **CKP portability** — Export any agent as a portable bundle with beliefs, provenance, and A2A agent card
+- **Actor bundle portability** — Export or import actors as CKP-compatible bundles with beliefs, memories, provenance, and an agent card for downstream reuse
 - **Interactive shell** — Natural language queries over simulation data, actor interviews, live SQL access
 - **Zero-dependency audit** — One `.db` file contains the entire run: config, actors, posts, rounds, graphs, search cache
 
@@ -466,6 +466,12 @@ node dist/index.js export-agent --db simulation.db --actor journalist-01 --out .
 node dist/index.js import-agent --bundle ./exports --db other-sim.db --run new-run
 ```
 
+This is a secondary portability feature, not the runtime core. SeldonClaw does not execute CKP agents internally; it simulates actors inside a central engine, then projects them into portable bundles for:
+
+- moving an evolved actor between simulations
+- preserving a reusable actor snapshot outside the SQLite run file
+- future interoperability with external CKP runtimes
+
 ## CLI Reference
 
 | Command | Description |
@@ -534,9 +540,9 @@ Everything lives in a single SQLite database:
                         └──────────┘ └────────────────┘
 ```
 
-## CKP (ClawKernel Protocol)
+## CKP Bundles
 
-Exported agent bundles follow the CKP specification via `@clawkernel/sdk`:
+SeldonClaw uses CKP as an exchange format for actor bundles, not as the active runtime model. Exported bundles follow the CKP specification via `@clawkernel/sdk` and now include the actor's persisted deliberative memories:
 
 ```
 agent-bundle/
@@ -544,12 +550,25 @@ agent-bundle/
 ├── actor_state.json       # stance, influence, activity, followers
 ├── beliefs.json           # topic → sentiment mappings
 ├── topics.json            # topic interests + weights
+├── memories.json          # persisted reflections, interactions, event and narrative memories
 ├── provenance.json        # entity → claims → chunks → documents
 ├── persona.md             # personality description
 └── manifest.meta.json     # run metadata, version, export timestamp
 ```
 
 All exports are automatically scrubbed for secrets (API keys, tokens, credentials) before writing.
+
+What this gives you today:
+
+- a portable actor snapshot with beliefs, topics, and lived memory carried out of the run
+- a clean import path back into another SeldonClaw run
+- an early interoperability layer for external CKP consumers
+
+What it does not yet export:
+
+- full post history
+- exposure history
+- decision cache / raw reasoning traces
 
 ## Development
 
@@ -566,7 +585,7 @@ npx tsc --noEmit
 
 ### Test Suite
 
-403 tests across 27 test files covering:
+405 tests across 27 test files covering:
 
 - Knowledge graph pipeline (ingest → claims → entities → resolution)
 - Ontology extraction and entity typing
@@ -636,7 +655,7 @@ seldonclaw/
 │   ├── reproducibility.ts # Seedable PRNG
 │   ├── types.ts          # Domain types
 │   └── ids.ts            # ID generation
-├── tests/                # 27 test files, 403 tests
+├── tests/                # 27 test files, 405 tests
 ├── package.json
 ├── tsconfig.json
 ├── .env.example
