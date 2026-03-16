@@ -1,8 +1,8 @@
-# PublicMachina — Implementation Roadmap
+# PublicMachina — Implementation History
 
-> **Source of truth:** `PLAN.md` (architecture, interfaces, schema, types).
-> This file is the **execution checklist**. Every step references concrete lines/sections in PLAN.md.
-> Do NOT duplicate specs here — only reference them.
+> **Status:** historical implementation log.
+> `PLAN.md` is the active architecture and roadmap document.
+> This file preserves milestone-by-milestone execution notes, verification checkpoints, and deferred experiments for contributors who need the project history.
 
 ## How to use this file across sessions
 

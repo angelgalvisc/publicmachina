@@ -1,9 +1,10 @@
-# PublicMachina — Social Simulation Engine on CKP + DirectLLM
+# PublicMachina — Architecture and Roadmap
 
-> Current authority note:
-> this file still contains historical v1 planning sections. When specific details here conflict with the implemented runtime, treat the code as authoritative:
+> Scope note:
+> this file documents the active architecture and near-term roadmap for PublicMachina.
+> When specific details here conflict with the implemented runtime, treat the code as authoritative:
 > [config.ts](/Users/agc/Documents/publicmachina/src/config.ts), [platform.ts](/Users/agc/Documents/publicmachina/src/platform.ts), [schema.ts](/Users/agc/Documents/publicmachina/src/schema.ts), [store.ts](/Users/agc/Documents/publicmachina/src/store.ts), [cognition.ts](/Users/agc/Documents/publicmachina/src/cognition.ts), [feed.ts](/Users/agc/Documents/publicmachina/src/feed.ts), and [engine.ts](/Users/agc/Documents/publicmachina/src/engine.ts).
-> Historical `NullClawBackend` / `nullclaw` sections below are design notes only. They are not part of the active runtime or active config surface.
+> Historical implementation notes and deferred runtime experiments live in [IMPLEMENTATION_HISTORY.md](/Users/agc/Documents/publicmachina/IMPLEMENTATION_HISTORY.md).
 
 ## Context
 
@@ -1741,7 +1742,7 @@ with the CLI/shell phase, not before Phase 2. The core pipeline comes first.
 
 ## MVP (Phase 1)
 
-**Architecture decision:** NullClaw spike skipped. DirectLLMBackend chosen (see CLAUDE.md Phase 0).
+**Architecture decision:** NullClaw spike skipped. DirectLLMBackend chosen (see IMPLEMENTATION_HISTORY.md Phase 0).
 NullClaw integration deferred — actors only need structured LLM completions, not agent capabilities.
 
 **MVP Scope:** End-to-end pipeline with 10-20 actors, 5 rounds, X (formerly Twitter) only.

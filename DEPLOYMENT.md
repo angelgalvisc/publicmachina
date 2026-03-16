@@ -1,334 +1,213 @@
-# PublicMachina — Deployment & Operational Security Guide
+# PublicMachina — Operations Guide
 
-This document covers deployment topology, network security, secrets management, container hardening, and observability. It complements `PLAN.md` (architecture & code) without duplicating it.
+This document covers the active operational surface of PublicMachina:
 
-## Deployment Topologies
+- local development runs
+- packaged CLI installs
+- containerized batch runs
+- optional SearXNG integration
+- filesystem and secret-handling rules
 
-### Development (local)
+It complements `README.md` and `PLAN.md`. Historical notes about deferred external runtimes belong in `IMPLEMENTATION_HISTORY.md`, not here.
 
+## Runtime Model
+
+PublicMachina is a CLI-first TypeScript application.
+
+The active runtime is:
+
+- one Node.js process running the CLI
+- one SQLite database per environment or experiment
+- optional access to a live LLM provider
+- optional access to a self-hosted SearXNG instance for web-grounded search
+
+There is no required sidecar gateway in the active product.
+
+## Supported Topologies
+
+### Local Development
+
+Recommended for:
+
+- feature work
+- test runs
+- mock-mode validation
+- manual live checks with a real API key
+
+Layout:
+
+```text
+docs/           # source material (read-only in practice)
+simulation.db   # SQLite run store
+output/         # reports or generated artifacts
 ```
-┌─────────────────────────────────────┐
-│           localhost                  │
-│                                     │
-│  publicmachina ──127.0.0.1:3000──▶ nullclaw  │
-│       │                             │
-│  simulation.db    output/           │
-└─────────────────────────────────────┘
-```
 
-- 2 processes, same machine
-- NullClaw bound to `127.0.0.1` only
-- Pairing: optional (can disable for pure loopback)
-- API keys via env vars (`export ANTHROPIC_API_KEY=...`)
-- No containers required
+Command pattern:
 
-### Production / Demo
-
-```
-┌──────────────────────────────────────────┐
-│          Private network (bridge)         │
-│                                          │
-│  ┌──────────────┐    ┌───────────────┐   │
-│  │ publicmachina   │───▶│  nullclaw     │   │
-│  │ container    │    │  container    │   │
-│  │              │    │  port 3000    │   │
-│  │ vol: db,out  │    │  internal     │   │
-│  └──────────────┘    └───────────────┘   │
-│                                          │
-│  No ports exposed to host or Internet    │
-└──────────────────────────────────────────┘
-```
-
-- 2 separate containers, private Docker network
-- NullClaw: **never** exposed to the Internet
-- Pairing: **mandatory** (active by default in config)
-- Secrets: external secret store or Docker secrets
-- Minimal port exposure
-
-## Network Security
-
-### Binding
-
-| Environment | NullClaw bind address | Rationale |
-|---|---|---|
-| Local dev | `127.0.0.1:3000` | Loopback only, no external access |
-| Docker | Container-internal port `3000` | Docker network isolates; never publish to `0.0.0.0` |
-| Remote/cloud | Behind internal proxy | Proxy handles TLS, auth; NullClaw never directly reachable |
-
-### Docker Port Publishing
-
-**Correct:**
 ```bash
-docker run -p 127.0.0.1:3000:3000 nullclaw
+publicmachina run --docs ./docs --db ./simulation.db --run local-smoke
 ```
 
-**Wrong (exposes to all interfaces):**
+### Packaged CLI Install
+
+Recommended for:
+
+- trying the project outside the repo
+- validating npm packaging
+- lightweight workstation usage
+
+Typical flow:
+
 ```bash
-docker run -p 3000:3000 nullclaw          # DO NOT do this
-docker run -p 0.0.0.0:3000:3000 nullclaw  # DO NOT do this
+npm install
+npm run build
+node dist/index.js doctor
+node dist/index.js run --docs ./docs --db ./simulation.db --mock
 ```
 
-### Rules
+After publishing, this becomes:
 
-1. NullClaw is an internal service. It should never be a public endpoint.
-2. If remote deployment is needed, place NullClaw behind an internal reverse proxy (nginx, Caddy, Traefik) — do not expose it directly.
-3. All PublicMachina → NullClaw traffic should stay on loopback or a private Docker network.
+```bash
+npx publicmachina doctor
+npx publicmachina run --docs ./docs --db ./simulation.db --mock
+```
 
-## Authentication
+### Containerized Batch Run
 
-### Pairing
+Recommended for:
 
-The plan's config defaults to `pairing.enabled: true` (secure by default).
+- reproducible demo environments
+- scheduled batch runs
+- isolated runs on a server or VM
 
-| Scenario | Pairing | Rationale |
-|---|---|---|
-| Local dev, confirmed `127.0.0.1` | Can disable | Loopback-only, no external risk |
-| Docker compose, private network | **Required** | Container networking can be misconfigured |
-| Any remote or cloud deployment | **Required** | Network boundaries are not guaranteed |
+Container policy:
 
-### Bearer Token Handling
-
-The pairing token is a **session secret**. It must:
-
-- Live in memory only during the process lifetime
-- **Never** be written to `run_manifest.config_snapshot`
-- **Never** appear in `telemetry.action_detail`
-- **Never** be logged to stdout, stderr, or log files
-- **Never** be included in export bundles
-
-`config.ts` provides `sanitizeForStorage()` which strips all secrets before serializing to `config_snapshot`. This function removes:
-- `pairing.token`
-- `providers.*.apiKeyEnv` values (keeps the env var name, not the resolved value)
-- Any field matching known secret patterns
-
-### Auth Header Flow
-
-When pairing is active, every `NullClawBackend` request to `/a2a` or `/webhook` must include the `Authorization: Bearer <token>` header. The `authHeaders()` method in `nullclaw-worker.ts` handles this transparently.
+- one container for PublicMachina
+- optional separate SearXNG container
+- no need for additional runtime services unless you explicitly want them
 
 ## Secrets Management
 
-### Rules
+Rules:
 
-1. API keys are **only** provided via environment variables or a secret store.
-2. The following locations must **never** contain actual secret values:
-   - `publicmachina.config.yaml` (only env var names like `"ANTHROPIC_API_KEY"`)
-   - `claw.yaml` templates or exports (only `secret_ref` references)
-   - `run_manifest.config_snapshot` (sanitized by `config.ts`)
-   - `decision_cache.raw_response` (redacted by `reproducibility.ts`)
-   - `telemetry.action_detail` (redacted by `telemetry.ts`)
-   - Export bundles (`ckp.ts` runs `scrubSecrets()` before writing)
-   - Snapshots
-   - Log files
+1. API keys live in environment variables or an external secret store.
+2. Config files should store env var names or non-secret endpoints, not raw credentials.
+3. Export bundles must never contain secrets.
+4. Reports, telemetry, and persisted config snapshots must stay sanitized.
 
-3. `ckp.ts` export-agent pipeline runs `scrubSecrets()` which:
-   - Strips any field value matching API key patterns (`sk-...`, `key-...`, bearer tokens)
-   - Preserves `secret_ref` references (the name, not the value)
-   - Scans all JSON fields recursively for leaked secrets
-   - Fails the export if a potential secret is detected and `--force` is not set
+Protected surfaces already in code:
 
-### Environment Variable Convention
+- `sanitizeForStorage()` in `src/config.ts`
+- telemetry sanitization in `src/telemetry.ts`
+- CKP bundle scrubbing in `src/ckp.ts`
+
+Recommended environment variables:
 
 ```bash
-# Required
 export ANTHROPIC_API_KEY="sk-ant-..."
-
-# Optional (NullClaw configuration)
-export NULLCLAW_PORT=3000
-export NULLCLAW_PAIRING_TOKEN="..."   # auto-generated if not set
 ```
 
-## Container Hardening
+Optional search:
 
-### Image Design
+```bash
+export SEARXNG_URL="http://localhost:8888"
+```
 
-- **2 separate containers** — do not combine into one "for simplicity"
-- Base images: minimal (e.g., `node:22-slim` for publicmachina, binary-only for nullclaw)
-- Run as **non-root** user
-- Use Docker rootless mode on Linux when possible
+## Filesystem Rules
 
-### Read-Only Root Filesystem
+Treat these paths explicitly:
+
+| Path | Access | Purpose |
+|---|---|---|
+| `simulation.db` | read-write | primary simulation store |
+| `output/` | read-write | reports and generated artifacts |
+| `docs/` | read-only by convention | source material for ingestion |
+| temporary dirs | ephemeral | smoke tests, exports, build output |
+
+Do not mount or expose an entire home directory into a container just to run PublicMachina.
+
+## Optional SearXNG
+
+PublicMachina can enrich Tier A/B cognition with real web search through SearXNG.
+
+Operational guidance:
+
+- keep SearXNG self-hosted
+- prefer a local containerized deployment
+- expose it on a trusted local or private-network address
+- ensure JSON output is enabled in `search.formats`
+
+Typical local endpoint:
+
+```text
+http://localhost:8888
+```
+
+Minimal validation flow:
+
+```bash
+curl "http://localhost:8888/search?q=product+recall&format=json"
+publicmachina doctor --config ./publicmachina.config.yaml
+```
+
+## Container Example
+
+This example reflects the active product surface:
 
 ```yaml
-# docker-compose.yml example
 services:
   publicmachina:
     image: publicmachina:latest
-    read_only: true
-    user: "1000:1000"
-    tmpfs:
-      - /tmp
-    volumes:
-      - ./data/simulation.db:/app/simulation.db
-      - ./data/output:/app/output
-      - ./docs:/app/docs:ro          # input documents: read-only
+    working_dir: /app
+    command: ["node", "dist/index.js", "run", "--docs", "/app/docs", "--db", "/app/simulation.db", "--run", "batch-run"]
     environment:
       - ANTHROPIC_API_KEY
-    deploy:
-      resources:
-        limits:
-          cpus: "2.0"
-          memory: 512M
-
-  nullclaw:
-    image: nullclaw:latest
+    volumes:
+      - ./docs:/app/docs:ro
+      - ./data:/app
     read_only: true
-    user: "1000:1000"
     tmpfs:
       - /tmp
-    networks:
-      - internal
-    deploy:
-      resources:
-        limits:
-          cpus: "1.0"
-          memory: 256M
 
-networks:
-  internal:
-    driver: bridge
-    internal: true                   # no external connectivity
+  searxng:
+    image: searxng/searxng:latest
+    ports:
+      - "127.0.0.1:8888:8080"
 ```
 
-### Volume Policy
+Notes:
 
-| Mount | Container | Access | Purpose |
-|---|---|---|---|
-| `simulation.db` | publicmachina | read-write | Primary data store |
-| `output/` | publicmachina | read-write | Report output |
-| `docs/` (input) | publicmachina | **read-only** | Source documents for ingestion |
-| `/tmp` | both | tmpfs | Ephemeral temp files only |
+- `publicmachina` does not need inbound public ports
+- SearXNG should stay local/private unless you have a reason to expose it
+- mount only what the run needs
 
-**Do not mount** the entire workspace, home directory, or host filesystem into any container.
+## Release Validation
 
-### Resource Limits
+Before calling an environment production-ready, validate:
 
-Set CPU and memory limits per container to prevent a runaway LLM call loop from consuming all host resources. Suggested starting points:
+1. `publicmachina doctor` passes
+2. `npm test` passes in the source checkout
+3. `npm pack --dry-run` succeeds for publishable builds
+4. a real non-`--mock` run succeeds with your configured LLM key
+5. if search is enabled, at least one run produces rows in:
+   - `search_requests`
+   - `search_cache`
 
-| Container | CPU | Memory | Rationale |
-|---|---|---|---|
-| publicmachina | 2 cores | 512MB | SQLite + Node.js + LLM API calls |
-| nullclaw | 1 core | 256MB | Lightweight gateway process (678KB binary) |
+## Security Checklist
 
-Adjust based on actual benchmarks.
+- [ ] No raw secrets in `publicmachina.config.yaml`
+- [ ] No raw secrets in exported CKP bundles
+- [ ] `simulation.db` stored with restricted filesystem permissions where appropriate
+- [ ] `docs/` mounted or shared read-only in containerized runs
+- [ ] optional SearXNG endpoint reachable only where intended
+- [ ] no public-facing service exposed unless deliberately added outside PublicMachina itself
 
-## SQLite Security
+## Non-Goals
 
-### File Permissions
+This document does not describe:
 
-```bash
-chmod 600 simulation.db              # owner read-write only
-chown appuser:appuser simulation.db  # owned by the non-root app user
-```
+- a mandatory gateway runtime
+- an active NullClaw deployment path
+- historical experimental backends
 
-### Backups
-
-- Back up `simulation.db` after every important run completes.
-- Use `sqlite3 simulation.db ".backup backup.db"` for safe online backups (respects WAL).
-- Version backups by run_id: `simulation-<run_id>.db.bak`
-- On shared hosts, encrypt the volume or disk where the database lives.
-
-### WAL Mode Considerations
-
-The schema uses `PRAGMA journal_mode=WAL` for concurrent reads. In Docker:
-- The WAL file (`simulation.db-wal`) and shared-memory file (`simulation.db-shm`) must be on the same volume as the main database.
-- Do not put the database on a network filesystem (NFS, CIFS) — WAL requires POSIX locking.
-
-## Observability
-
-### What Telemetry Must NOT Store
-
-The `telemetry` table's `action_detail` field is sanitized by `telemetry.ts sanitizeDetail()` before writing. The following must **never** appear in stored telemetry:
-
-- API keys or bearer tokens
-- HTTP Authorization headers
-- Pairing tokens
-- Complete prompts with embedded secrets
-- Raw LLM request/response bodies (those go in `decision_cache` with their own redaction)
-
-### Separation of Concerns
-
-| Data type | Storage | Purpose |
-|---|---|---|
-| Simulation data | `telemetry`, `rounds`, `posts`, etc. in SQLite | Analysis, reports, replay |
-| Operational logs | stdout/stderr or log files | Debugging, monitoring |
-| Secrets | Environment variables or secret store | Authentication |
-
-These three categories must never mix. Operational logs should not contain simulation data. Simulation data should not contain secrets.
-
-### Redact Mode
-
-For debugging in shared environments, `telemetry.ts` supports a redact mode (`simulation.redactTelemetry: true` in config) that:
-
-- Truncates `action_detail` content fields to first 50 characters
-- Replaces actor personality text with `[REDACTED]`
-- Strips any field value matching secret patterns
-- Preserves all numeric metrics (tokens, cost, duration) unchanged
-
-## Export Bundle Security
-
-### What Gets Scrubbed
-
-`ckp.ts scrubSecrets()` runs before any file is written to the bundle:
-
-| Field | Action |
-|---|---|
-| `claw.yaml` provider `auth.secret_ref` | Kept (it's a reference name, not a value) |
-| Any resolved API key value | **Stripped** |
-| Bearer tokens | **Stripped** |
-| `config_snapshot` references in metadata | **Sanitized** (same as run_manifest) |
-| Pairing tokens | **Stripped** |
-
-### Bundle Versioning
-
-Every export bundle's `manifest.meta.json` includes:
-
-```json
-{
-  "run_id": "uuid",
-  "round_exported": 42,
-  "publicmachina_version": "0.1.0",
-  "schema_version": "1",
-  "graph_revision_id": "sha256:...",
-  "prompt_version": "sha256:...",
-  "exported_at": "2026-03-14T12:00:00Z"
-}
-```
-
-This enables receivers to verify compatibility and provenance without exposing any secrets.
-
-### Portability Disclaimer
-
-Portability means structure + state, **not behavioral equivalence**. An exported actor running on a different CKP runtime will have:
-- Same personality, tools, policies, beliefs
-- Different LLM (potentially), different context window, different memory backend
-- No guarantee of identical behavior
-
-## Quick Reference
-
-### Dev Setup Checklist
-
-- [ ] `export ANTHROPIC_API_KEY=...`
-- [ ] NullClaw running on `127.0.0.1:3000`
-- [ ] `pairing.enabled: false` only if confirmed loopback
-- [ ] `simulation.db` with restrictive permissions
-- [ ] Input docs in a separate directory (not mixed with output)
-
-### Prod/Demo Checklist
-
-- [ ] 2 separate containers, private Docker network
-- [ ] NullClaw **not** exposed to any public interface
-- [ ] `pairing.enabled: true` with auto-generated token
-- [ ] API keys via Docker secrets or env vars (never in config files)
-- [ ] Read-only root filesystem on both containers
-- [ ] Resource limits set (CPU + memory)
-- [ ] Input docs mounted read-only
-- [ ] Volume only for `simulation.db` and `output/`
-- [ ] Running as non-root user
-- [ ] Database backups configured
-
-### Cardinal Rules
-
-1. **Never expose NullClaw to the Internet.**
-2. **Never disable auth outside of loopback.**
-3. **Never mix secrets with exports or telemetry.**
-4. **Never put everything in a single container "for simplicity."**
+Those are not part of the active PublicMachina product surface.

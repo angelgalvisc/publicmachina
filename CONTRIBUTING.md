@@ -26,8 +26,8 @@ PublicMachina is a flat `src/` structure (~20 TypeScript files). Read `PLAN.md` 
 
 **Key files:**
 - `PLAN.md` — Complete architecture, schema, interfaces, and design decisions
-- `CLAUDE.md` — Implementation roadmap with phase-by-phase verification
-- `DEPLOYMENT.md` — Deployment topologies and operational guidance
+- `IMPLEMENTATION_HISTORY.md` — Historical implementation log and milestone notes
+- `DEPLOYMENT.md` — Operational guidance for local runs, packaged installs, and optional SearXNG
 
 ## Code Standards
 

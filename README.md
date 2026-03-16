@@ -16,7 +16,6 @@
 [![Node](https://img.shields.io/badge/Node-%3E%3D18-339933?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.5+-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org)
 [![Tests](https://img.shields.io/badge/Tests-406_passing-brightgreen?style=flat-square)]()
-[![CKP](https://img.shields.io/badge/CKP-v0.2.6-orange?style=flat-square)](https://github.com/angelgalvisc/clawkernel)
 
 ---
 
@@ -49,6 +48,15 @@ This makes PublicMachina useful as both a scenario lab and an operator tool: you
 - Reports, actor interviews, and shell-based analysis tools
 - Reusable actor bundles plus a reproducible audit trail
 
+## Documentation Map
+
+- `README.md` — product overview, installation, quick start, and active feature surface
+- `PLAN.md` — active architecture and roadmap
+- `IMPLEMENTATION_HISTORY.md` — historical implementation log and milestone record
+- `DEPLOYMENT.md` — operational notes for local runs, packaged installs, and optional SearXNG
+- `docs/data-model.md` — human-readable relational model
+- `docs/data-model.json` — machine-readable schema map for tooling
+
 ## Why It Exists
 
 Most agent demos optimize for spectacle. Most research simulators optimize for flexibility. PublicMachina is built for a narrower but harder target: **high-agency simulation with auditability, reproducibility, and operator control**.
@@ -72,7 +80,7 @@ At the operator level, it gives researchers and builders a way to design simulat
 - **Feed algorithms** — Chronological, heuristic, trace-aware, embedding, and hybrid ranking modes with out-of-network mix control
 - **Negative social dynamics** — Mutes and blocks alter feed visibility and cross-actor propagation; report actions can trigger deterministic platform moderation
 - **Idle fast-forward** — Quiet tails with no recent posts, no events, and no activated actors can be compressed into audited skipped spans
-- **Actor bundle portability** — Export or import actors as CKP-compatible bundles with beliefs, memories, provenance, and an agent card for downstream reuse
+- **Portable actor bundles** — Export or import actors as CKP-compatible bundles with beliefs, memories, provenance, and an agent card for downstream reuse
 - **Interactive shell** — Natural language queries over simulation data, actor interviews, live SQL access
 - **Zero-dependency audit** — One `.db` file contains the entire run: config, actors, posts, rounds, graphs, search cache
 
@@ -281,9 +289,9 @@ Documents ──→ Ingest ──→ Knowledge Graph ──→ Ontology ──�
                                          │
                               ┌──────────┼──────────┐
                               ▼          ▼          ▼
-                           Report    Interview    CKP Export
+                           Report    Interview    Bundle Export
                            (metrics   (talk to    (portable
-                            + LLM     actors)     agent bundles)
+                            + LLM     actors)     actor bundles)
                            narrative)
 ```
 
@@ -456,10 +464,10 @@ node dist/index.js interview --db simulation.db --actor "journalist-01" --questi
 node dist/index.js shell --db simulation.db
 ```
 
-### Export/Import Agents (CKP)
+### Portable Actor Bundles
 
 ```bash
-# Export an actor as a portable CKP bundle
+# Export an actor as a portable actor bundle
 node dist/index.js export-agent --db simulation.db --actor journalist-01 --out ./exports
 
 # Import into another simulation
@@ -486,8 +494,8 @@ This is a secondary portability feature, not the runtime core. PublicMachina doe
 | `inspect` | Show actor context, beliefs, topics, and recent posts |
 | `report` | Generate metrics report with optional LLM narrative |
 | `interview` | Interview an actor (single question or REPL mode) |
-| `export-agent` | Export actor as CKP bundle |
-| `import-agent` | Import CKP bundle into a run |
+| `export-agent` | Export actor as portable bundle |
+| `import-agent` | Import portable bundle into a run |
 | `shell` | Interactive REPL with NL→SQL, interviews, and schema exploration |
 | `init` | Guided configuration wizard |
 | `doctor` | Diagnostic checks (Node version, config, API keys, SearXNG, SQLite) |
@@ -540,7 +548,7 @@ Everything lives in a single SQLite database:
                         └──────────┘ └────────────────┘
 ```
 
-## CKP Bundles
+## Portable Actor Bundles
 
 PublicMachina uses CKP as an exchange format for actor bundles, not as the active runtime model. Exported bundles follow the CKP specification via `@clawkernel/sdk` and now include the actor's persisted deliberative memories plus a portable record of authored posts, exposure history, and decision traces:
 
