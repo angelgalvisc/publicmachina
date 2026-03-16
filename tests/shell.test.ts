@@ -279,7 +279,7 @@ describe("startShell", () => {
     );
 
     const combined = outputs.join("");
-    expect(prompts).toContain("seldonclaw> ");
+    expect(prompts).toContain("publicmachina> ");
     expect(errors).toHaveLength(0);
     expect(combined).toContain("SQL: SELECT COUNT(*) as total FROM posts WHERE run_id = 'shell-run'");
     expect(combined).toContain("total");

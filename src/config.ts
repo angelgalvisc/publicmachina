@@ -1,5 +1,5 @@
 /**
- * config.ts — Config loader (seldonclaw.config.yaml) + sanitizeForStorage()
+ * config.ts — Config loader (publicmachina.config.yaml) + sanitizeForStorage()
  *
  * Source of truth: PLAN.md §SimConfig (lines 1466-1555)
  *

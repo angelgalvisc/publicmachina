@@ -1,4 +1,4 @@
-# SeldonClaw — Deployment & Operational Security Guide
+# PublicMachina — Deployment & Operational Security Guide
 
 This document covers deployment topology, network security, secrets management, container hardening, and observability. It complements `PLAN.md` (architecture & code) without duplicating it.
 
@@ -10,7 +10,7 @@ This document covers deployment topology, network security, secrets management, 
 ┌─────────────────────────────────────┐
 │           localhost                  │
 │                                     │
-│  seldonclaw ──127.0.0.1:3000──▶ nullclaw  │
+│  publicmachina ──127.0.0.1:3000──▶ nullclaw  │
 │       │                             │
 │  simulation.db    output/           │
 └─────────────────────────────────────┘
@@ -29,7 +29,7 @@ This document covers deployment topology, network security, secrets management, 
 │          Private network (bridge)         │
 │                                          │
 │  ┌──────────────┐    ┌───────────────┐   │
-│  │ seldonclaw   │───▶│  nullclaw     │   │
+│  │ publicmachina   │───▶│  nullclaw     │   │
 │  │ container    │    │  container    │   │
 │  │              │    │  port 3000    │   │
 │  │ vol: db,out  │    │  internal     │   │
@@ -72,7 +72,7 @@ docker run -p 0.0.0.0:3000:3000 nullclaw  # DO NOT do this
 
 1. NullClaw is an internal service. It should never be a public endpoint.
 2. If remote deployment is needed, place NullClaw behind an internal reverse proxy (nginx, Caddy, Traefik) — do not expose it directly.
-3. All SeldonClaw → NullClaw traffic should stay on loopback or a private Docker network.
+3. All PublicMachina → NullClaw traffic should stay on loopback or a private Docker network.
 
 ## Authentication
 
@@ -111,7 +111,7 @@ When pairing is active, every `NullClawBackend` request to `/a2a` or `/webhook` 
 
 1. API keys are **only** provided via environment variables or a secret store.
 2. The following locations must **never** contain actual secret values:
-   - `seldonclaw.config.yaml` (only env var names like `"ANTHROPIC_API_KEY"`)
+   - `publicmachina.config.yaml` (only env var names like `"ANTHROPIC_API_KEY"`)
    - `claw.yaml` templates or exports (only `secret_ref` references)
    - `run_manifest.config_snapshot` (sanitized by `config.ts`)
    - `decision_cache.raw_response` (redacted by `reproducibility.ts`)
@@ -142,7 +142,7 @@ export NULLCLAW_PAIRING_TOKEN="..."   # auto-generated if not set
 ### Image Design
 
 - **2 separate containers** — do not combine into one "for simplicity"
-- Base images: minimal (e.g., `node:22-slim` for seldonclaw, binary-only for nullclaw)
+- Base images: minimal (e.g., `node:22-slim` for publicmachina, binary-only for nullclaw)
 - Run as **non-root** user
 - Use Docker rootless mode on Linux when possible
 
@@ -151,8 +151,8 @@ export NULLCLAW_PAIRING_TOKEN="..."   # auto-generated if not set
 ```yaml
 # docker-compose.yml example
 services:
-  seldonclaw:
-    image: seldonclaw:latest
+  publicmachina:
+    image: publicmachina:latest
     read_only: true
     user: "1000:1000"
     tmpfs:
@@ -193,9 +193,9 @@ networks:
 
 | Mount | Container | Access | Purpose |
 |---|---|---|---|
-| `simulation.db` | seldonclaw | read-write | Primary data store |
-| `output/` | seldonclaw | read-write | Report output |
-| `docs/` (input) | seldonclaw | **read-only** | Source documents for ingestion |
+| `simulation.db` | publicmachina | read-write | Primary data store |
+| `output/` | publicmachina | read-write | Report output |
+| `docs/` (input) | publicmachina | **read-only** | Source documents for ingestion |
 | `/tmp` | both | tmpfs | Ephemeral temp files only |
 
 **Do not mount** the entire workspace, home directory, or host filesystem into any container.
@@ -206,7 +206,7 @@ Set CPU and memory limits per container to prevent a runaway LLM call loop from 
 
 | Container | CPU | Memory | Rationale |
 |---|---|---|---|
-| seldonclaw | 2 cores | 512MB | SQLite + Node.js + LLM API calls |
+| publicmachina | 2 cores | 512MB | SQLite + Node.js + LLM API calls |
 | nullclaw | 1 core | 256MB | Lightweight gateway process (678KB binary) |
 
 Adjust based on actual benchmarks.
@@ -286,7 +286,7 @@ Every export bundle's `manifest.meta.json` includes:
 {
   "run_id": "uuid",
   "round_exported": 42,
-  "seldonclaw_version": "0.1.0",
+  "publicmachina_version": "0.1.0",
   "schema_version": "1",
   "graph_revision_id": "sha256:...",
   "prompt_version": "sha256:...",

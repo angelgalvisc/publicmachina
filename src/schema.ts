@@ -1,5 +1,5 @@
 /**
- * schema.ts — SQLite DDL for SeldonClaw
+ * schema.ts — SQLite DDL for PublicMachina
  *
  * Source of truth: PLAN.md §SQLite Schema
  *

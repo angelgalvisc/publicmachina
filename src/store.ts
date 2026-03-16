@@ -1,7 +1,7 @@
 /**
  * store.ts — GraphStore interface + SQLiteGraphStore implementation
  *
- * The storage boundary for SeldonClaw. All persistence goes through GraphStore.
+ * The storage boundary for PublicMachina. All persistence goes through GraphStore.
  * SQLiteGraphStore is the sole implementation (v1).
  */
 

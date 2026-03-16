@@ -1,12 +1,12 @@
-# Contributing to SeldonClaw
+# Contributing to PublicMachina
 
-Thank you for your interest in contributing to SeldonClaw.
+Thank you for your interest in contributing to PublicMachina.
 
 ## Getting Started
 
 ```bash
-git clone https://github.com/angelgalvisc/seldonclaw.git
-cd seldonclaw
+git clone https://github.com/angelgalvisc/publicmachina.git
+cd publicmachina
 npm install
 npm test
 ```
@@ -22,7 +22,7 @@ npm run build    # Production build
 
 ## Architecture
 
-SeldonClaw is a flat `src/` structure (~20 TypeScript files). Read `PLAN.md` for the full architectural specification.
+PublicMachina is a flat `src/` structure (~20 TypeScript files). Read `PLAN.md` for the full architectural specification.
 
 **Key files:**
 - `PLAN.md` — Complete architecture, schema, interfaces, and design decisions

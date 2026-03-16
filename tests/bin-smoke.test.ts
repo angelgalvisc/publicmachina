@@ -39,7 +39,7 @@ describe("published binary smoke test", () => {
   });
 
   it("runs design through the built binary and writes output files", () => {
-    const dir = mkdtempSync(join(tmpdir(), "seldonclaw-bin-smoke-"));
+    const dir = mkdtempSync(join(tmpdir(), "publicmachina-bin-smoke-"));
     tempDirs.push(dir);
 
     const outConfig = join(dir, "generated.config.yaml");

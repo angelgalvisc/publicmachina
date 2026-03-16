@@ -1,15 +1,15 @@
-# SeldonClaw — Social Simulation Engine on CKP + DirectLLM
+# PublicMachina — Social Simulation Engine on CKP + DirectLLM
 
 > Current authority note:
 > this file still contains historical v1 planning sections. When specific details here conflict with the implemented runtime, treat the code as authoritative:
-> [config.ts](/Users/agc/Documents/seldonclaw/src/config.ts), [platform.ts](/Users/agc/Documents/seldonclaw/src/platform.ts), [schema.ts](/Users/agc/Documents/seldonclaw/src/schema.ts), [store.ts](/Users/agc/Documents/seldonclaw/src/store.ts), [cognition.ts](/Users/agc/Documents/seldonclaw/src/cognition.ts), [feed.ts](/Users/agc/Documents/seldonclaw/src/feed.ts), and [engine.ts](/Users/agc/Documents/seldonclaw/src/engine.ts).
+> [config.ts](/Users/agc/Documents/publicmachina/src/config.ts), [platform.ts](/Users/agc/Documents/publicmachina/src/platform.ts), [schema.ts](/Users/agc/Documents/publicmachina/src/schema.ts), [store.ts](/Users/agc/Documents/publicmachina/src/store.ts), [cognition.ts](/Users/agc/Documents/publicmachina/src/cognition.ts), [feed.ts](/Users/agc/Documents/publicmachina/src/feed.ts), and [engine.ts](/Users/agc/Documents/publicmachina/src/engine.ts).
 > Historical `NullClawBackend` / `nullclaw` sections below are design notes only. They are not part of the active runtime or active config surface.
 
 ## Context
 
 MiroFish (github.com/666ghj/MiroFish) is a pioneering social simulation engine with a well-designed pipeline (ontology → graph → profiles → simulation → report). However, it has limitations that hinder adoption in resource-constrained or audit-sensitive environments: dependency on Zep Cloud, OASIS as a black box for the social engine, no agent portability, hardcoded timezone, and fragmented storage.
 
-**SeldonClaw** builds on the same pipeline concept but with different design choices: TypeScript-first, SQLite-first, DirectLLMBackend by default (swappable), CKP as the actor portability contract (not as the social engine), explicit and auditable social engine, and flat structure (~20 files).
+**PublicMachina** builds on the same pipeline concept but with different design choices: TypeScript-first, SQLite-first, DirectLLMBackend by default (swappable), CKP as the actor portability contract (not as the social engine), explicit and auditable social engine, and flat structure (~20 files).
 
 ## Design Decisions
 
@@ -34,7 +34,7 @@ MiroFish (github.com/666ghj/MiroFish) is a pioneering social simulation engine w
 
 ```
 ┌──────────────────────────────────────────────────────┐
-│                seldonclaw (1 TS process)              │
+│                publicmachina (1 TS process)              │
 │                                                      │
 │  ┌────────┐  ┌──────────┐  ┌───────────────────┐     │
 │  │ ingest │→ │ ontology │→ │  graph + entity   │     │
@@ -96,7 +96,7 @@ The active runtime uses `DirectLLMBackend`; external gateway-backed cognition re
 ## Project Structure
 
 ```
-seldonclaw/
+publicmachina/
 ├── src/
 │   ├── index.ts              # Entry point + CLI (commander)
 │   ├── db.ts                 # Barrel re-export (types + schema + store + ids)
@@ -104,7 +104,7 @@ seldonclaw/
 │   ├── schema.ts             # SQLite DDL (SCHEMA_SQL constant)
 │   ├── store.ts              # GraphStore interface + SQLiteGraphStore
 │   ├── ids.ts                # uuid() + stableId() helpers
-│   ├── config.ts             # Config loader (seldonclaw.config.yaml) + sanitizeForStorage()
+│   ├── config.ts             # Config loader (publicmachina.config.yaml) + sanitizeForStorage()
 │   ├── design.ts             # Natural-language brief → SimulationSpec → rendered config
 │   ├── llm.ts                # Multi-provider LLM client (Anthropic native + OpenAI compat)
 │   ├── ingest.ts             # Document parsing (MD/TXT, optional PDF)
@@ -127,7 +127,7 @@ seldonclaw/
 ├── templates/                   # Phase 7 — placeholder (empty)
 ├── package.json
 ├── tsconfig.json
-├── seldonclaw.config.yaml       # Default config
+├── publicmachina.config.yaml       # Default config
 └── tests/
     ├── db.test.ts
     ├── ingest.test.ts
@@ -527,7 +527,7 @@ CREATE TABLE run_manifest (
   total_rounds INTEGER,
   status TEXT DEFAULT 'running',      -- running | completed | failed | paused
   resumed_from TEXT,                  -- run_id if resumed from another run
-  version TEXT                        -- seldonclaw version
+  version TEXT                        -- publicmachina version
 );
 
 -- Decision cache: records each LLM response for exact replay
@@ -596,7 +596,7 @@ CREATE TABLE snapshots (
 
 ### ActorSpec vs ActorState
 
-Formal separation. CKP exports ActorSpec. SeldonClaw maintains ActorState.
+Formal separation. CKP exports ActorSpec. PublicMachina maintains ActorState.
 
 ```typescript
 // ActorSpec — portable agent contract (exportable via CKP)
@@ -618,7 +618,7 @@ interface ActorSpec {
   provider_hints: ProviderHint;   // preferred model, token limits
 }
 
-// ActorState — live simulation state (not CKP, SeldonClaw-specific)
+// ActorState — live simulation state (not CKP, PublicMachina-specific)
 interface ActorState {
   actor_id: string;
   beliefs: Map<string, number>;   // topic → sentiment (-1.0 to 1.0)
@@ -1130,14 +1130,14 @@ class NullClawBackend implements CognitionBackend {
 ### NullClawAdapter — Local shim contract
 
 ```typescript
-// Translates between SeldonClaw's DecisionRequest/Response and NullClaw's A2A format
+// Translates between PublicMachina's DecisionRequest/Response and NullClaw's A2A format
 
 interface NullClawAdapter {
-  // SeldonClaw → A2A
+  // PublicMachina → A2A
   toDecisionMessage(request: DecisionRequest): A2ADecisionMessage;
   toInterviewMessage(actorContext: string, question: string): A2AInterviewMessage;
 
-  // A2A → SeldonClaw
+  // A2A → PublicMachina
   fromA2AResult(result: A2AMessageResult): DecisionResponse;
   extractInterviewResponse(result: A2AMessageResult): string;
 }
@@ -1156,7 +1156,7 @@ interface A2ADecisionMessage {
       }];
     };
     metadata?: {
-      seldonclaw_message_type: "decide";
+      publicmachina_message_type: "decide";
       actor_id: string;
       round_num: number;
     };
@@ -1171,7 +1171,7 @@ type A2AInterviewMessage = Omit<A2ADecisionMessage, 'params'> & {
       parts: [{ type: "text"; text: string }];   // actorContext + question
     };
     metadata?: {
-      seldonclaw_message_type: "interview";
+      publicmachina_message_type: "interview";
       actor_id: string;
     };
   };
@@ -1180,14 +1180,14 @@ type A2AInterviewMessage = Omit<A2ADecisionMessage, 'params'> & {
 // If NullClaw POST /a2a does not support this flow directly,
 // the adapter can alternatively use POST /webhook with a
 // message format that NullClaw processes.
-// The key point: SeldonClaw never invents endpoints that NullClaw doesn't have.
+// The key point: PublicMachina never invents endpoints that NullClaw doesn't have.
 ```
 
-**Policy:** SeldonClaw never invents NullClaw endpoints. If `/a2a` doesn't support the flow, use `/webhook` as fallback or contribute to the upstream gateway.
+**Policy:** PublicMachina never invents NullClaw endpoints. If `/a2a` doesn't support the flow, use `/webhook` as fallback or contribute to the upstream gateway.
 
 ### Operational NullClaw Configuration (nullclaw-worker.ts)
 
-SeldonClaw needs to configure NullClaw with the correct LLM provider. Mechanism:
+PublicMachina needs to configure NullClaw with the correct LLM provider. Mechanism:
 
 ```typescript
 async function bootstrapNullClaw(config: NullClawConfig): Promise<void> {
@@ -1252,7 +1252,7 @@ interface DecisionResponse {
 
 ### Interaction Summary (hybrid actor memory)
 
-Actors need temporal memory — "I argued with @rector-01 last round", "My post about tuition got 40 likes". SeldonClaw now uses a **hybrid memory model**:
+Actors need temporal memory — "I argued with @rector-01 last round", "My post about tuition got 40 likes". PublicMachina now uses a **hybrid memory model**:
 
 - **derived interaction memory** from normalized tables (`posts`, `exposures`, `telemetry`, `follows`)
 - **persisted deliberative memory** in `actor_memories` for Tier A/B actors (reflections, salient interactions, event memories, narrative memories)
@@ -1315,10 +1315,10 @@ function buildSimContext(
 An exported actor can be executed in another CKP conformant runtime,
 but it will not behave identically (different LLM, different context, different memory).
 
-| CKP Primitive | Usage in SeldonClaw | Where |
+| CKP Primitive | Usage in PublicMachina | Where |
 |---|---|---|
 | **Identity** | ✅ ActorSpec → personality, autonomy, capabilities | `templates/*.claw.yaml` + export bundles |
-| **Provider** | ✅ Multi-provider per stage (native SDK for structured extraction) | `llm.ts` + `seldonclaw.config.yaml` |
+| **Provider** | ✅ Multi-provider per stage (native SDK for structured extraction) | `llm.ts` + `publicmachina.config.yaml` |
 | **Channel** | ⚠️ Metadata only (X platform). Not a real CKP Channel | `templates/*.claw.yaml` metadata |
 | **Tool** | ✅ 6 social actions with input_schema | `templates/*.claw.yaml` tools section |
 | **Skill** | ⚠️ Behavior patterns as instructions in personality | Inline in Identity.personality |
@@ -1349,7 +1349,7 @@ Layer 1: Portable contract (CKP)      Layer 2: Exportable state            Layer
 # SECURITY: ckp.ts runs scrubSecrets() before writing any bundle file.
 # Strips: API keys, bearer tokens, pairing tokens, env var values, auth headers.
 # Only secret_ref references are preserved (e.g., "LLM_API_KEY"), never actual values.
-seldonclaw export-agent --run <run-id> --actor journalist-01 --out ./agent-bundle/
+publicmachina export-agent --run <run-id> --actor journalist-01 --out ./agent-bundle/
 # Generates:
 #   agent-bundle/
 #   ├── claw.yaml              # CKP manifest (ActorSpec) — secrets scrubbed
@@ -1362,10 +1362,10 @@ seldonclaw export-agent --run <run-id> --actor journalist-01 --out ./agent-bundl
 #   ├── decisions.json         # decision traces with parsed action/reasoning + model metadata
 #   ├── provenance.json        # entity → claims → chunks → documents
 #   ├── persona.md             # full personality text
-#   └── manifest.meta.json     # run_id, round exported, seldonclaw version, schema version
+#   └── manifest.meta.json     # run_id, round exported, publicmachina version, schema version
 
 # Import: reconstitutes an actor from a bundle
-seldonclaw import-agent --bundle ./agent-bundle/ --db simulation.db --run <run-id>
+publicmachina import-agent --bundle ./agent-bundle/ --db simulation.db --run <run-id>
 ```
 
 ## Archetype Manifest Example: persona.claw.yaml
@@ -1378,7 +1378,7 @@ metadata:
   version: "1.0.0"
   labels:
     archetype: "persona"
-    seldonclaw-version: "0.1.0"
+    publicmachina-version: "0.1.0"
 spec:
   identity:
     inline:
@@ -1489,10 +1489,10 @@ spec:
             conditions: { max_calls_per_round: 5 }
 ```
 
-## SimConfig (seldonclaw.config.yaml)
+## SimConfig (publicmachina.config.yaml)
 
 ```yaml
-# seldonclaw.config.yaml
+# publicmachina.config.yaml
 simulation:
   platform: "x"                   # X (formerly Twitter) — single platform in v1
   totalHours: 72
@@ -1525,7 +1525,7 @@ providers:
     model: "claude-sonnet-4-20250514"
     apiKeyEnv: "ANTHROPIC_API_KEY"
   simulation:                    # Upstream provider that NullClaw uses for LLM calls
-    model: "claude-haiku-4-20250414"   # NullClaw makes the LLM call, not SeldonClaw
+    model: "claude-haiku-4-20250414"   # NullClaw makes the LLM call, not PublicMachina
     apiKeyEnv: "ANTHROPIC_API_KEY"     # passed to NullClaw via env or config
   report:                        # For report — NATIVE SDK
     sdk: "anthropic"
@@ -1534,7 +1534,7 @@ providers:
 
 nullclaw:
   gatewayUrl: "http://localhost:3000"   # NullClaw gateway default port (doc: 3000)
-  binary: "nullclaw"                    # path to binary (if SeldonClaw spawns it)
+  binary: "nullclaw"                    # path to binary (if PublicMachina spawns it)
   autoStart: true                       # auto-spawn if not running
   upstreamProvider: "simulation"        # which LLM provider NullClaw uses
   pairing:
@@ -1543,8 +1543,8 @@ nullclaw:
                                         # NullClaw security guide recommends active pairing
                                         # for any non-loopback connection.
     token: ""                           # pairing token (auto-generated if empty, never logged)
-  agentProfile:                         # SeldonClaw agent identity for NullClaw
-    name: "seldonclaw-worker"
+  agentProfile:                         # PublicMachina agent identity for NullClaw
+    name: "publicmachina-worker"
     capabilities: ["decide", "interview"]
 
 feed:
@@ -1584,54 +1584,54 @@ output:
 
 ```bash
 # Full pipeline
-seldonclaw run \
+publicmachina run \
   --docs ./documents/ \
   --hypothesis "If the university raises tuition 30%, how does public opinion react" \
-  --config seldonclaw.config.yaml
+  --config publicmachina.config.yaml
 
 # Individual steps
-seldonclaw ingest --docs ./documents/ --out simulation.db
-seldonclaw analyze --db simulation.db --hypothesis "..."
-seldonclaw generate --db simulation.db
-seldonclaw simulate --db simulation.db --rounds 72
-seldonclaw report --db simulation.db --out ./output/
+publicmachina ingest --docs ./documents/ --out simulation.db
+publicmachina analyze --db simulation.db --hypothesis "..."
+publicmachina generate --db simulation.db
+publicmachina simulate --db simulation.db --rounds 72
+publicmachina report --db simulation.db --out ./output/
 
 # Reproducibility
-seldonclaw simulate --db simulation.db --seed 42                  # explicit seed
-seldonclaw resume --db simulation.db --run <run-id>               # resume from last snapshot
-seldonclaw replay --db simulation.db --run <run-id> --to-round 30 # replay up to round 30
+publicmachina simulate --db simulation.db --seed 42                  # explicit seed
+publicmachina resume --db simulation.db --run <run-id>               # resume from last snapshot
+publicmachina replay --db simulation.db --run <run-id> --to-round 30 # replay up to round 30
 
 # Utilities
-seldonclaw init                                              # conversational setup wizard
-seldonclaw design --brief "..." --out-spec simulation.spec.json --out-config seldonclaw.generated.config.yaml
-seldonclaw doctor                                            # validate install, config, provider, DB access
-seldonclaw config show                                       # print sanitized current config
-seldonclaw config set output.dir ./output                    # update a config field
-seldonclaw inspect --db simulation.db --actor "journalist-01"     # view actor state
-seldonclaw interview --db simulation.db --actor "journalist-01"   # interview via NullClaw
-seldonclaw export --db simulation.db --actor "journalist-01"      # export concrete claw.yaml
-seldonclaw stats --db simulation.db                               # simulation metrics
-seldonclaw stats --db simulation.db --tiers                       # breakdown by cognition tier
+publicmachina init                                              # conversational setup wizard
+publicmachina design --brief "..." --out-spec simulation.spec.json --out-config publicmachina.generated.config.yaml
+publicmachina doctor                                            # validate install, config, provider, DB access
+publicmachina config show                                       # print sanitized current config
+publicmachina config set output.dir ./output                    # update a config field
+publicmachina inspect --db simulation.db --actor "journalist-01"     # view actor state
+publicmachina interview --db simulation.db --actor "journalist-01"   # interview via NullClaw
+publicmachina export --db simulation.db --actor "journalist-01"      # export concrete claw.yaml
+publicmachina stats --db simulation.db                               # simulation metrics
+publicmachina stats --db simulation.db --tiers                       # breakdown by cognition tier
 
 # Actor portability
-seldonclaw export-agent --run <run-id> --actor journalist-01 --out ./agent-bundle/
-seldonclaw import-agent --bundle ./agent-bundle/ --db simulation.db --run <run-id>
+publicmachina export-agent --run <run-id> --actor journalist-01 --out ./agent-bundle/
+publicmachina import-agent --bundle ./agent-bundle/ --db simulation.db --run <run-id>
 
 # Interactive shell (conversational REPL)
-seldonclaw shell --db simulation.db --run <run-id>
+publicmachina shell --db simulation.db --run <run-id>
 ```
 
 ## Operator Tools Layer
 
 **Principle:** the internal pipeline remains modular (`ingest.ts`, `graph.ts`, `engine.ts`, etc.), but the
-user-facing interfaces should not call those modules ad hoc. Instead, SeldonClaw exposes a thin layer of
+user-facing interfaces should not call those modules ad hoc. Instead, PublicMachina exposes a thin layer of
 typed operator tools that all interfaces reuse:
 
 - structured CLI (`index.ts`)
 - conversational shell (`shell.ts`)
 - future web UI or API
 
-These are **tools**, not CKP "skills". They are runtime-facing handlers for operating SeldonClaw; they do
+These are **tools**, not CKP "skills". They are runtime-facing handlers for operating PublicMachina; they do
 not replace the core modules and they are not part of the actor cognition model.
 
 ```typescript
@@ -1678,10 +1678,10 @@ with the CLI/shell phase, not before Phase 2. The core pipeline comes first.
 
 ```json
 {
-  "name": "seldonclaw",
+  "name": "publicmachina",
   "version": "0.1.0",
   "type": "module",
-  "bin": { "seldonclaw": "./dist/index.js" },
+  "bin": { "publicmachina": "./dist/index.js" },
   "dependencies": {
     "@clawkernel/sdk": "^0.2.6",
     "@anthropic-ai/sdk": "^0.30.0",
@@ -1706,14 +1706,14 @@ with the CLI/shell phase, not before Phase 2. The core pipeline comes first.
 
 | Target | Level | When | Note |
 |---|---|---|---|
-| NullClaw Bridge | L3 (31/31) | Externally validated by NullClaw | SeldonClaw does **not** re-validate L3; trusts the published conformant bridge |
-| seldonclaw→nullclaw integration | **Integration tests** | On SeldonClaw startup | GET /health, POST /pair (if applicable), round-trip /a2a with DecisionMessage + InterviewMessage |
+| NullClaw Bridge | L3 (31/31) | Externally validated by NullClaw | PublicMachina does **not** re-validate L3; trusts the published conformant bridge |
+| publicmachina→nullclaw integration | **Integration tests** | On PublicMachina startup | GET /health, POST /pair (if applicable), round-trip /a2a with DecisionMessage + InterviewMessage |
 | Archetype manifests (4) | CKP JSON Schema | On generation, via `@clawkernel/sdk` | Validates structure, not runtime |
 | Concrete exports | L1 (13/13) | Only when exporting an actor as a real CKP agent | Optional, on demand |
 
 ## Improvements Over MiroFish
 
-| Dimension | MiroFish | SeldonClaw |
+| Dimension | MiroFish | PublicMachina |
 |---|---|---|
 | **Processes** | Flask + OASIS subprocess + Zep Cloud | **1 process** (Node, DirectLLMBackend built-in) |
 | **RAM** | >1GB | **Pi 4 viable** (footprint pending benchmark) |
@@ -1859,7 +1859,7 @@ Phase 3 (P2): Optional interviews for deeper insight
 Conversational REPL over a completed (or running) simulation. Not a general chatbot — a structured interface that translates natural language into SQL queries, actor interviews, and existing CLI operations.
 
 ```bash
-seldonclaw shell --db simulation.db --run <run-id>
+publicmachina shell --db simulation.db --run <run-id>
 ```
 
 ### Conversational Setup
@@ -1867,17 +1867,17 @@ seldonclaw shell --db simulation.db --run <run-id>
 The CLI should also support a guided setup flow for first-time users:
 
 ```bash
-seldonclaw init
-seldonclaw doctor
+publicmachina init
+publicmachina doctor
 ```
 
-`seldonclaw init` is a conversational setup assistant, not a static flag dump. It should:
+`publicmachina init` is a conversational setup assistant, not a static flag dump. It should:
 
 1. Detect the local environment
    - Node runtime available
    - writable working directory
    - SQLite file path availability
-   - existing `seldonclaw.config.yaml` / `.env`
+   - existing `publicmachina.config.yaml` / `.env`
 2. Ask only for the minimum required inputs
    - LLM provider/model profile
    - API key
@@ -1885,7 +1885,7 @@ seldonclaw doctor
    - output directory
    - timezone
 3. Persist configuration safely
-   - write `seldonclaw.config.yaml` without embedding secrets
+   - write `publicmachina.config.yaml` without embedding secrets
    - store API keys in environment variables, `.env`, or OS keychain
    - never write raw API keys into `run_manifest`, telemetry, exports, or snapshots
 4. Validate the setup before exiting
@@ -1895,7 +1895,7 @@ seldonclaw doctor
 5. Offer the next action
    - e.g. "Run a sample simulation now?"
 
-`seldonclaw doctor` is a deterministic diagnostic command. It should:
+`publicmachina doctor` is a deterministic diagnostic command. It should:
 - verify required files and permissions
 - check that configured provider env vars exist
 - validate the config schema
@@ -1905,7 +1905,7 @@ seldonclaw doctor
 
 **Secret handling rules:**
 - Never echo the full API key back to the terminal after entry.
-- Never persist raw secrets in `seldonclaw.config.yaml`.
+- Never persist raw secrets in `publicmachina.config.yaml`.
 - Never include secrets in telemetry, `config_snapshot`, exports, or shell context.
 - `config show` must display only a sanitized view.
 
@@ -1946,7 +1946,7 @@ interface ShellCommand {
 ### Example Session
 
 ```
-seldonclaw> what was the overall sentiment trend across all rounds?
+publicmachina> what was the overall sentiment trend across all rounds?
   ┌─────────┬──────────────┐
   │ round   │ avg_sentiment│
   ├─────────┼──────────────┤
@@ -1957,10 +1957,10 @@ seldonclaw> what was the overall sentiment trend across all rounds?
   └─────────┴──────────────┘
   Sentiment started slightly positive and turned negative by round 3.
 
-seldonclaw> who was the most influential actor?
+publicmachina> who was the most influential actor?
   journalist-01 (influence: 0.92, reach: 847, 23 posts, tier A)
 
-seldonclaw> interview journalist-01
+publicmachina> interview journalist-01
   Entering interview mode with journalist-01. Type /exit to return.
 
   journalist-01> Why did you change your stance on tuition?
@@ -1970,18 +1970,18 @@ seldonclaw> interview journalist-01
 
   journalist-01> /exit
 
-seldonclaw> which posts went viral?
+publicmachina> which posts went viral?
   3 posts exceeded viral threshold (30 exposures):
   - post-a8f3 by student-activist-03 (round 4, reach: 127)
   - post-c2d1 by journalist-01 (round 6, reach: 89)
   - post-f7e2 by faculty-union-rep (round 8, reach: 54)
 
-seldonclaw> compare community "students" vs "faculty" on sentiment
+publicmachina> compare community "students" vs "faculty" on sentiment
   students:  avg_sentiment = -0.72 (strongly opposing)
   faculty:   avg_sentiment = -0.31 (mildly opposing)
   overlap:   0.4 (moderate cross-exposure)
 
-seldonclaw> export journalist-01
+publicmachina> export journalist-01
   Exported to ./agent-bundle/journalist-01/ (claw.yaml + state + beliefs)
 ```
 
@@ -2163,17 +2163,17 @@ The LLM interprets intent. TypeScript remains the source of truth for validation
 - surface assumptions before anything is executed
 - generate stable artifacts:
   - `simulation.spec.json`
-  - `seldonclaw.generated.config.yaml`
+  - `publicmachina.generated.config.yaml`
 
 ### Recommended user flow
 
 ```bash
-seldonclaw init
-seldonclaw design \
+publicmachina init
+publicmachina design \
   --docs ./docs/product-recall \
   --brief "Create a 10-round simulation about a global consumer electronics product recall. Focus on journalists, company spokespeople, regulators, investors, and customers. Only journalists, analysts, and institutions may search the web. Allow up to 4 search-enabled actors per round, with 2 Tier A and 2 Tier B. Enable embedding-aware feed ranking."
-seldonclaw run \
-  --config ./seldonclaw.generated.config.yaml \
+publicmachina run \
+  --config ./publicmachina.generated.config.yaml \
   --docs ./docs/product-recall \
   --hypothesis "Journalists and regulators accelerate negative sentiment faster than the company can stabilize the narrative."
 ```
@@ -2195,7 +2195,7 @@ seldonclaw run \
    - `renderSimulationConfig()`
    - `renderSimulationConfigYaml()`
    - `formatSimulationPlan()`
-2. Add `seldonclaw design`
+2. Add `publicmachina design`
    - `--brief`
    - `--docs`
    - `--out-spec`
@@ -2228,10 +2228,10 @@ seldonclaw run \
 
 ### Verification
 
-1. `seldonclaw design --brief "..." --docs ./docs/example --mock --yes`
+1. `publicmachina design --brief "..." --docs ./docs/example --mock --yes`
 2. inspect generated `simulation.spec.json`
-3. inspect generated `seldonclaw.generated.config.yaml`
-4. `seldonclaw run --config ./seldonclaw.generated.config.yaml --docs ./docs/example --mock`
+3. inspect generated `publicmachina.generated.config.yaml`
+4. `publicmachina run --config ./publicmachina.generated.config.yaml --docs ./docs/example --mock`
 5. confirm:
    - identical brief + identical defaults -> equivalent rendered config
    - warnings are surfaced when docs path is missing
@@ -2239,27 +2239,27 @@ seldonclaw run \
 
 ## Verification
 
-1. `seldonclaw run --docs fixtures/sample-docs/ --hypothesis "..." --rounds 5 --seed 42 --config test.config.yaml`
+1. `publicmachina run --docs fixtures/sample-docs/ --hypothesis "..." --rounds 5 --seed 42 --config test.config.yaml`
 2. Verify `simulation.db`:
    - Provenance: documents (>0), chunks (>0), claims (>0)
    - Entity resolution: no obvious duplicates, merge_history audited
    - Platform: actors (10-20), posts (>0), actor_topics, actor_beliefs, post_topics normalized
    - Telemetry: telemetry (>0 with cognition_tier), rounds (5 with tier_a/b/c_calls), run_manifest (1 row)
    - Reproducibility: decision_cache (>0), snapshots (≥1)
-3. `seldonclaw stats --db simulation.db` shows: total posts, active actors per round, total cost
-4. `seldonclaw stats --db simulation.db --tiers` shows: calls per tier A/B/C, estimated savings
+3. `publicmachina stats --db simulation.db` shows: total posts, active actors per round, total cost
+4. `publicmachina stats --db simulation.db --tiers` shows: calls per tier A/B/C, estimated savings
 5. **Full reproducibility:**
-   - `seldonclaw replay --db simulation2.db --run <id>` produces identical results
+   - `publicmachina replay --db simulation2.db --run <id>` produces identical results
    - Tier C: deterministic via seed (same rules, same activation)
    - Tier A/B: deterministic via `decision_cache` + `RecordedBackend` (0 LLM calls on replay)
 6. **Export-agent:**
-   - `seldonclaw export-agent --run <id> --actor journalist-01 --out ./bundle/`
+   - `publicmachina export-agent --run <id> --actor journalist-01 --out ./bundle/`
    - Bundle contains: claw.yaml (valid CKP), actor_state.json, beliefs.json, topics.json, memories.json, posts.json, exposures.json, decisions.json, provenance.json, manifest.meta.json
-7. **Import-agent:** `seldonclaw import-agent --bundle ./bundle/ --db sim2.db --run <id>` reconstitutes actor
+7. **Import-agent:** `publicmachina import-agent --bundle ./bundle/ --db sim2.db --run <id>` reconstitutes actor
 8. **Report policy:** `report.ts` only reads normalized tables (verify with grep: no JSON parse in report queries)
-9. **Interview:** `seldonclaw interview --db simulation.db --actor journalist-01` responds coherently via CognitionBackend
+9. **Interview:** `publicmachina interview --db simulation.db --actor journalist-01` responds coherently via CognitionBackend
 10. **Interactive shell:**
-    - `seldonclaw shell --db simulation.db --run <id>` starts REPL
+    - `publicmachina shell --db simulation.db --run <id>` starts REPL
     - Natural language query returns correct SQL results (verified against direct SQL)
     - Interview mode enters/exits cleanly, actor responds coherently
     - Shell never executes write operations without explicit confirmation

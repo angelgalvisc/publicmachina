@@ -28,7 +28,7 @@ export interface ActorSpec {
   provider_hints: ProviderHint;
 }
 
-/** ActorState — live simulation state (not CKP, SeldonClaw-specific) */
+/** ActorState — live simulation state (not CKP, PublicMachina-specific) */
 export interface ActorState {
   actor_id: string;
   beliefs: Map<string, number>;

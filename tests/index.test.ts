@@ -20,7 +20,7 @@ import { updateRound } from "../src/telemetry.js";
 const tempDirs: string[] = [];
 
 function makeTempDbPath(): string {
-  const dir = mkdtempSync(join(tmpdir(), "seldonclaw-cli-"));
+  const dir = mkdtempSync(join(tmpdir(), "publicmachina-cli-"));
   tempDirs.push(dir);
   return join(dir, "simulation.db");
 }
@@ -102,7 +102,7 @@ describe("CLI simulate", () => {
     await runCli(
       [
         "node",
-        "seldonclaw",
+        "publicmachina",
         "simulate",
         "--db",
         dbPath,
@@ -134,7 +134,7 @@ describe("CLI pipeline", () => {
     const capture = makeIO();
 
     await runCli(
-      ["node", "seldonclaw", "ingest", "--db", dbPath, "--docs", fixtureDocsDir()],
+      ["node", "publicmachina", "ingest", "--db", dbPath, "--docs", fixtureDocsDir()],
       capture.io
     );
 
@@ -152,13 +152,13 @@ describe("CLI pipeline", () => {
     store.close();
 
     await runCli(
-      ["node", "seldonclaw", "ingest", "--db", dbPath, "--docs", fixtureDocsDir()],
+      ["node", "publicmachina", "ingest", "--db", dbPath, "--docs", fixtureDocsDir()],
       makeIO().io
     );
 
     const capture = makeIO();
     await runCli(
-      ["node", "seldonclaw", "analyze", "--db", dbPath, "--mock"],
+      ["node", "publicmachina", "analyze", "--db", dbPath, "--mock"],
       capture.io
     );
 
@@ -174,11 +174,11 @@ describe("CLI pipeline", () => {
     const dbPath = makeTempDbPath();
 
     await runCli(
-      ["node", "seldonclaw", "ingest", "--db", dbPath, "--docs", fixtureDocsDir()],
+      ["node", "publicmachina", "ingest", "--db", dbPath, "--docs", fixtureDocsDir()],
       makeIO().io
     );
     await runCli(
-      ["node", "seldonclaw", "analyze", "--db", dbPath, "--mock"],
+      ["node", "publicmachina", "analyze", "--db", dbPath, "--mock"],
       makeIO().io
     );
 
@@ -186,7 +186,7 @@ describe("CLI pipeline", () => {
     await runCli(
       [
         "node",
-        "seldonclaw",
+        "publicmachina",
         "generate",
         "--db",
         dbPath,
@@ -214,7 +214,7 @@ describe("CLI pipeline", () => {
     await runCli(
       [
         "node",
-        "seldonclaw",
+        "publicmachina",
         "run",
         "--db",
         dbPath,
@@ -252,7 +252,7 @@ describe("CLI pipeline", () => {
     await runCli(
       [
         "node",
-        "seldonclaw",
+        "publicmachina",
         "run",
         "--db",
         dbPath,
@@ -273,7 +273,7 @@ describe("CLI pipeline", () => {
 
     const capture = makeIO();
     await runCli(
-      ["node", "seldonclaw", "inspect", "--db", dbPath, "--run", "inspect-run", "--actor", actor.name],
+      ["node", "publicmachina", "inspect", "--db", dbPath, "--run", "inspect-run", "--actor", actor.name],
       capture.io
     );
 
@@ -323,7 +323,7 @@ describe("CLI stats", () => {
 
     const capture = makeIO();
     await runCli(
-      ["node", "seldonclaw", "stats", "--db", dbPath, "--run", "run-1", "--tiers"],
+      ["node", "publicmachina", "stats", "--db", dbPath, "--run", "run-1", "--tiers"],
       capture.io
     );
 
@@ -346,7 +346,7 @@ describe("CLI stats", () => {
 
     const capture = makeIO();
     await expect(
-      runCli(["node", "seldonclaw", "stats", "--db", dbPath], capture.io)
+      runCli(["node", "publicmachina", "stats", "--db", dbPath], capture.io)
     ).rejects.toThrow("No runs found in database.");
   });
 });
@@ -392,7 +392,7 @@ describe("CLI report", () => {
 
     const capture = makeIO();
     await runCli(
-      ["node", "seldonclaw", "report", "--db", dbPath, "--run", "run-1", "--mock"],
+      ["node", "publicmachina", "report", "--db", dbPath, "--run", "run-1", "--mock"],
       capture.io
     );
 
@@ -405,7 +405,7 @@ describe("CLI report", () => {
 
 describe("CLI init", () => {
   it("writes a guided config without storing secrets", async () => {
-    const configPath = join(makeTempDbPath().replace("simulation.db", ""), "seldonclaw.config.yaml");
+    const configPath = join(makeTempDbPath().replace("simulation.db", ""), "publicmachina.config.yaml");
     const capture = makeIO();
 
     await runInitCommand(
@@ -439,7 +439,7 @@ describe("CLI init", () => {
 
 describe("CLI design", () => {
   it("writes a simulation spec and generated config from a global brief", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "seldonclaw-design-"));
+    const dir = mkdtempSync(join(tmpdir(), "publicmachina-design-"));
     tempDirs.push(dir);
     const configPath = join(dir, "designed.config.yaml");
     const specPath = join(dir, "simulation.spec.json");
@@ -448,7 +448,7 @@ describe("CLI design", () => {
     await runCli(
       [
         "node",
-        "seldonclaw",
+        "publicmachina",
         "design",
         "--brief",
         "Create a 10-round simulation about a global consumer electronics recall. Only journalists, analysts, and institutions may search the web. Allow up to 4 search-enabled actors per round. Enable embedding-aware feed ranking.",
@@ -496,9 +496,9 @@ describe("CLI doctor", () => {
         throw new Error("failed to acquire search server address");
       }
 
-      const dir = mkdtempSync(join(tmpdir(), "seldonclaw-doctor-"));
+      const dir = mkdtempSync(join(tmpdir(), "publicmachina-doctor-"));
       tempDirs.push(dir);
-      const configPath = join(dir, "seldonclaw.config.yaml");
+      const configPath = join(dir, "publicmachina.config.yaml");
       writeFileSync(
         configPath,
         [
@@ -541,7 +541,7 @@ describe("CLI doctor", () => {
 
       const capture = makeIO();
       await runCli(
-        ["node", "seldonclaw", "doctor", "--config", configPath],
+        ["node", "publicmachina", "doctor", "--config", configPath],
         capture.io
       );
 

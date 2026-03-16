@@ -1,5 +1,5 @@
 /**
- * interview.ts — Actor interview module for SeldonClaw
+ * interview.ts — Actor interview module for PublicMachina
  *
  * Provides functions for interviewing simulated actors:
  *   - formatActorContext: build natural-language context string

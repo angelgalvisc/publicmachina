@@ -21,7 +21,7 @@ You will receive a response within 72 hours. We will work with you to understand
 
 ## Security Design Principles
 
-SeldonClaw follows these security principles by design:
+PublicMachina follows these security principles by design:
 
 ### Secrets Never in Persistent Data
 - API keys are referenced by environment variable name, never stored as values

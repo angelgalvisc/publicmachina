@@ -1,5 +1,5 @@
 {
-  "name": "seldonclaw",
+  "name": "publicmachina",
   "version": "0.1.0",
   "description": "Auditable social simulation engine with SQLite-first runs, replayability, and CKP actor portability.",
   "license": "Apache-2.0",
@@ -13,15 +13,15 @@
     ".env.example"
   ],
   "bin": {
-    "seldonclaw": "./dist/index.js"
+    "publicmachina": "./dist/index.js"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/angelgalvisc/seldonclaw.git"
+    "url": "git+https://github.com/angelgalvisc/publicmachina.git"
   },
-  "homepage": "https://github.com/angelgalvisc/seldonclaw#readme",
+  "homepage": "https://github.com/angelgalvisc/publicmachina#readme",
   "bugs": {
-    "url": "https://github.com/angelgalvisc/seldonclaw/issues"
+    "url": "https://github.com/angelgalvisc/publicmachina/issues"
   },
   "keywords": [
     "simulation",

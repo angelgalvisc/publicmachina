@@ -23,7 +23,7 @@ import {
   type RunManifest,
 } from "../src/db.js";
 
-const TEST_DB = "/tmp/seldonclaw-test-db.sqlite";
+const TEST_DB = "/tmp/publicmachina-test-db.sqlite";
 
 describe("SQLiteGraphStore", () => {
   let store: SQLiteGraphStore;

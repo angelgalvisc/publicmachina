@@ -8,7 +8,7 @@
 ╘═╛   ╘═╛   ╘═╛   ╘═╛   ╘═╛   ╘═╛   ╘═╛
 </pre>
 
-# SeldonClaw
+# PublicMachina
 
 **The first social simulation engine where agents search the real web before deciding what to say.**
 
@@ -26,13 +26,13 @@
 
 ## Overview
 
-SeldonClaw is an auditable social simulation engine for testing how narratives, institutions, media actors, and online communities respond to real-world scenarios. It turns source material, configurable social dynamics, and optional live web context into a replayable simulation environment where agents observe, decide, interact, and evolve across rounds.
+PublicMachina is an auditable social simulation engine for testing how narratives, institutions, media actors, and online communities respond to real-world scenarios. It turns source material, configurable social dynamics, and optional live web context into a replayable simulation environment where agents observe, decide, interact, and evolve across rounds.
 
 These are simulated agents orchestrated by a central engine, not independent runtime containers. Each actor carries persistent state and moves through feed construction, cognitive routing, memory retrieval, optional web search, and platform policy before acting.
 
-Its strongest differentiator is explicit and visible: **SeldonClaw is the first social simulation engine where agents can search the real web before deciding what to say.** Tier A and Tier B actors can query a live SearXNG endpoint, then SeldonClaw applies an exact temporal cutoff before injecting that context into the decision loop. Results are cached in SQLite, logged per actor and round, and replayable later under the same cutoff and seed.
+Its strongest differentiator is explicit and visible: **PublicMachina is the first social simulation engine where agents can search the real web before deciding what to say.** Tier A and Tier B actors can query a live SearXNG endpoint, then PublicMachina applies an exact temporal cutoff before injecting that context into the decision loop. Results are cached in SQLite, logged per actor and round, and replayable later under the same cutoff and seed.
 
-This makes SeldonClaw useful as both a scenario lab and an operator tool: you can stress-test communication strategies, simulate narrative shocks, interview generated actors after the run, and inspect the full chain of why a given behavior emerged. Every run lives in a single SQLite file. Every major artifact remains inspectable.
+This makes PublicMachina useful as both a scenario lab and an operator tool: you can stress-test communication strategies, simulate narrative shocks, interview generated actors after the run, and inspect the full chain of why a given behavior emerged. Every run lives in a single SQLite file. Every major artifact remains inspectable.
 
 ## What You Give It
 
@@ -51,7 +51,7 @@ This makes SeldonClaw useful as both a scenario lab and an operator tool: you ca
 
 ## Why It Exists
 
-Most agent demos optimize for spectacle. Most research simulators optimize for flexibility. SeldonClaw is built for a narrower but harder target: **high-agency simulation with auditability, reproducibility, and operator control**.
+Most agent demos optimize for spectacle. Most research simulators optimize for flexibility. PublicMachina is built for a narrower but harder target: **high-agency simulation with auditability, reproducibility, and operator control**.
 
 At the system level, it works as a rehearsal environment for crisis communication, institutional response, reputation stress-testing, policy scenarios, and narrative competition.
 
@@ -59,8 +59,8 @@ At the operator level, it gives researchers and builders a way to design simulat
 
 ### Key Capabilities
 
-- **Web-grounded decisions** — Tier A/B agents query real web sources via SearXNG before deciding, with an exact cutoff applied by SeldonClaw and cache-first determinism. [See details below.](#web-grounded-search)
-- **Natural-language simulation design** — Turn a free-form brief into a validated `simulation.spec.json` plus deterministic `seldonclaw.config.yaml`
+- **Web-grounded decisions** — Tier A/B agents query real web sources via SearXNG before deciding, with an exact cutoff applied by PublicMachina and cache-first determinism. [See details below.](#web-grounded-search)
+- **Natural-language simulation design** — Turn a free-form brief into a validated `simulation.spec.json` plus deterministic `publicmachina.config.yaml`
 - **Deterministic simulations** — Seedable PRNG (xoshiro128**) guarantees identical runs from the same seed
 - **3-tier cognition** — Tier A (always LLM), Tier B (probabilistic LLM), Tier C (rule-based) for cost-efficient agent decisions
 - **Knowledge graph foundation** — Ingest documents, extract claims, resolve entities, build ontologies, then generate actor profiles grounded in real data
@@ -78,7 +78,7 @@ At the operator level, it gives researchers and builders a way to design simulat
 
 ## Web-Grounded Search
 
-SeldonClaw is the only social simulation engine that breaks the closed-information-bubble paradigm. Instead of limiting agents to the posts in their feed, Tier A and Tier B agents can search the real web — just like a real person would check the news before reacting to a trending topic.
+PublicMachina is the only social simulation engine that breaks the closed-information-bubble paradigm. Instead of limiting agents to the posts in their feed, Tier A and Tier B agents can search the real web — just like a real person would check the news before reacting to a trending topic.
 
 ### How It Works
 
@@ -128,7 +128,7 @@ Round N begins
 
 ### Temporal Backtesting
 
-The `cutoffDate` parameter controls what information agents can access. SearXNG itself exposes broad `time_range` filters for engines that support them, but SeldonClaw applies the exact cutoff date after retrieval so the same scenario can be replayed under tightly bounded information conditions.
+The `cutoffDate` parameter controls what information agents can access. SearXNG itself exposes broad `time_range` filters for engines that support them, but PublicMachina applies the exact cutoff date after retrieval so the same scenario can be replayed under tightly bounded information conditions.
 
 | Scenario | `cutoffDate` | Effect |
 |----------|-------------|--------|
@@ -146,7 +146,7 @@ Search results are cached in SQLite by `(query, cutoffDate, language, categories
 
 ### Comparison with Other Simulators
 
-| Feature | SeldonClaw | OASIS | Concordia | S³ | AgentSociety |
+| Feature | PublicMachina | OASIS | Concordia | S³ | AgentSociety |
 |---------|-----------|-------|-----------|-----|-------------|
 | Agents search the web | **Yes** | No | No | No | No |
 | Temporal cutoff control | **Yes** | — | — | — | — |
@@ -193,7 +193,7 @@ Search eligibility is policy-driven:
 
 ## Time Acceleration
 
-SeldonClaw now supports a conservative time-acceleration mode for long quiet tails. It does not invent behavior or skip active periods. Instead, it compresses stretches where the engine can prove that nothing actionable happens:
+PublicMachina now supports a conservative time-acceleration mode for long quiet tails. It does not invent behavior or skip active periods. Instead, it compresses stretches where the engine can prove that nothing actionable happens:
 
 - no recent posts remain in the propagation window
 - no active or scheduled events fire in the skipped span
@@ -213,7 +213,7 @@ This is Phase 9A only: a conservative fast-forward path for quiet tails. Adaptiv
 
 ## Platform Policy
 
-SeldonClaw no longer treats the platform as a single hardcoded X/Twitter action list. The runtime now consumes a `platform` policy that controls:
+PublicMachina no longer treats the platform as a single hardcoded X/Twitter action list. The runtime now consumes a `platform` policy that controls:
 
 - the platform name shown to cognition
 - which actions exist globally
@@ -344,8 +344,8 @@ For web-grounded search (optional):
 
 ```bash
 # Clone the repository
-git clone https://github.com/angelgalvisc/seldonclaw.git
-cd seldonclaw
+git clone https://github.com/angelgalvisc/publicmachina.git
+cd publicmachina
 
 # Install dependencies
 npm install
@@ -358,7 +358,7 @@ npm test
 ```
 
 For a source checkout, invoke the CLI with `node dist/index.js ...` or `npm link`.
-After the package is published, the same commands will work as `npx seldonclaw ...` or `seldonclaw ...`.
+After the package is published, the same commands will work as `npx publicmachina ...` or `publicmachina ...`.
 
 ### Configuration
 
@@ -371,7 +371,7 @@ cp .env.example .env
 # Edit .env with your Anthropic API key
 ```
 
-The `init` command generates a `seldonclaw.config.yaml` with model selection, API key references (never raw secrets), and output directory configuration.
+The `init` command generates a `publicmachina.config.yaml` with model selection, API key references (never raw secrets), and output directory configuration.
 The `doctor` command verifies your environment — including the SearXNG endpoint, if search is enabled.
 
 ### Design a Simulation in Natural Language
@@ -379,14 +379,14 @@ The `doctor` command verifies your environment — including the SearXNG endpoin
 After basic setup, use `design` to convert a natural-language brief into:
 
 - `simulation.spec.json` — the semantic design record
-- `seldonclaw.generated.config.yaml` — the executable engine config
+- `publicmachina.generated.config.yaml` — the executable engine config
 
 ```bash
 node dist/index.js design \
   --docs ./docs/product-recall \
   --brief "Create a 10-round simulation about a global consumer electronics product recall. Focus on journalists, company spokespeople, regulators, investors, and customers. Only journalists, analysts, and institutions may search the web. Allow up to 4 search-enabled actors per round, with 2 Tier A and 2 Tier B. Enable embedding-aware feed ranking." \
   --out-spec simulation.spec.json \
-  --out-config seldonclaw.generated.config.yaml
+  --out-config publicmachina.generated.config.yaml
 ```
 
 The command does **not** run the simulation immediately. It follows a professional, auditable flow:
@@ -417,7 +417,7 @@ Once the plan looks right:
 
 ```bash
 node dist/index.js run \
-  --config ./seldonclaw.generated.config.yaml \
+  --config ./publicmachina.generated.config.yaml \
   --docs ./docs/product-recall \
   --hypothesis "Journalists and regulators accelerate negative sentiment faster than the company can stabilize the narrative."
 ```
@@ -466,7 +466,7 @@ node dist/index.js export-agent --db simulation.db --actor journalist-01 --out .
 node dist/index.js import-agent --bundle ./exports --db other-sim.db --run new-run
 ```
 
-This is a secondary portability feature, not the runtime core. SeldonClaw does not execute CKP agents internally; it simulates actors inside a central engine, then projects them into portable bundles for:
+This is a secondary portability feature, not the runtime core. PublicMachina does not execute CKP agents internally; it simulates actors inside a central engine, then projects them into portable bundles for:
 
 - moving an evolved actor between simulations
 - preserving a reusable actor snapshot outside the SQLite run file
@@ -494,7 +494,7 @@ This is a secondary portability feature, not the runtime core. SeldonClaw does n
 
 ## Cognition Tiers
 
-SeldonClaw uses a tiered cognition system to balance simulation fidelity with cost:
+PublicMachina uses a tiered cognition system to balance simulation fidelity with cost:
 
 | Tier | Strategy | Use Case | Web Search | Cost |
 |------|----------|----------|------------|------|
@@ -542,7 +542,7 @@ Everything lives in a single SQLite database:
 
 ## CKP Bundles
 
-SeldonClaw uses CKP as an exchange format for actor bundles, not as the active runtime model. Exported bundles follow the CKP specification via `@clawkernel/sdk` and now include the actor's persisted deliberative memories plus a portable record of authored posts, exposure history, and decision traces:
+PublicMachina uses CKP as an exchange format for actor bundles, not as the active runtime model. Exported bundles follow the CKP specification via `@clawkernel/sdk` and now include the actor's persisted deliberative memories plus a portable record of authored posts, exposure history, and decision traces:
 
 ```
 agent-bundle/
@@ -564,7 +564,7 @@ All exports are automatically scrubbed for secrets (API keys, tokens, credential
 What this gives you today:
 
 - a portable actor snapshot with beliefs, topics, lived memory, authored posts, exposures, and decision traces carried out of the run
-- a clean import path back into another SeldonClaw run
+- a clean import path back into another PublicMachina run
 - import-side experience rehydration: posts, exposures, and decisions come back as safe actor memories instead of mutating the destination run's original timeline
 - an early interoperability layer for external CKP consumers
 
@@ -620,12 +620,12 @@ This keeps the suite deterministic and fast while still validating real storage 
 1. live LLM-provider execution with your configured API key
 2. live SearXNG-backed search against your own running endpoint
 
-Use `seldonclaw doctor`, then run a non-`--mock` scenario locally when you want to validate those external integrations end-to-end.
+Use `publicmachina doctor`, then run a non-`--mock` scenario locally when you want to validate those external integrations end-to-end.
 
 ## Project Structure
 
 ```
-seldonclaw/
+publicmachina/
 ├── src/
 │   ├── index.ts          # CLI entry point (Commander)
 │   ├── engine.ts         # Simulation round loop

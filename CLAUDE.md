@@ -1,4 +1,4 @@
-# SeldonClaw — Implementation Roadmap
+# PublicMachina — Implementation Roadmap
 
 > **Source of truth:** `PLAN.md` (architecture, interfaces, schema, types).
 > This file is the **execution checklist**. Every step references concrete lines/sections in PLAN.md.
@@ -9,9 +9,9 @@
 Start each session with:
 
 ```
-"SeldonClaw, Phase N, Step M. Previous steps passed verification.
- Spec: /Users/agc/Documents/seldonclaw/PLAN.md
- Ops: /Users/agc/Documents/seldonclaw/DEPLOYMENT.md
+"PublicMachina, Phase N, Step M. Previous steps passed verification.
+ Spec: /Users/agc/Documents/publicmachina/PLAN.md
+ Ops: /Users/agc/Documents/publicmachina/DEPLOYMENT.md
  Implement Step M."
 ```
 
@@ -28,7 +28,7 @@ Start each session with:
 
 **Decision:** NullClaw integration deferred. DirectLLMBackend chosen instead.
 NullClaw (96K LOC Zig binary, 678KB) provides agent capabilities (tools, channels, sandbox, memory)
-that SeldonClaw actors don't need — actors only require structured LLM completions.
+that PublicMachina actors don't need — actors only require structured LLM completions.
 DirectLLMBackend calls llm.ts directly: zero external process, zero HTTP overhead, same TypeScript stack.
 CKP compatibility preserved via `@clawkernel/sdk` (actor export/import contract).
 CognitionBackend interface allows future NullClaw swap if agent capabilities become needed.
@@ -62,7 +62,7 @@ These three do NOT depend on each other. Can be built in parallel.
 
 **Ref:** PLAN.md §SimConfig (lines 1470-1559)
 
-- [x] Loader for `seldonclaw.config.yaml`
+- [x] Loader for `publicmachina.config.yaml`
 - [x] Types: `SimConfig`, `CognitionConfig`, `FeedConfig`, `FatigueConfig`, `PropagationConfig`, `EventConfig`, `ActivationConfig`
 - [x] `sanitizeForStorage()` — strip secrets before persisting
 - [x] Validation: required fields, valid ranges
@@ -201,7 +201,7 @@ Each step feeds the next. Strict order.
 ## Phase 3: Cognition Layer (3 days) ✅ COMPLETE
 
 **Architecture decision:** NullClaw replaced with DirectLLMBackend.
-NullClaw (96K LOC Zig binary) was evaluated as over-engineering for SeldonClaw's needs.
+NullClaw (96K LOC Zig binary) was evaluated as over-engineering for PublicMachina's needs.
 Actor decisions only require structured LLM completions — not agent capabilities (tools, channels, sandbox).
 DirectLLMBackend calls llm.ts directly, zero external process dependency.
 CKP compatibility preserved via `@clawkernel/sdk` (actor export/import, A2A message types).
@@ -312,7 +312,7 @@ CKP compatibility preserved via `@clawkernel/sdk` (actor export/import, A2A mess
 
 ## Current Status
 
-SeldonClaw has moved beyond the original roadmap checkpoints in this file.
+PublicMachina has moved beyond the original roadmap checkpoints in this file.
 
 - Phases 1-8 are now implemented locally
 - Phase 9A conservative time acceleration is now implemented locally
@@ -339,8 +339,8 @@ Historical milestone. The codebase has since progressed beyond this checkpoint.
 ### Step 5.2: index.ts (CLI) ✅
 
 - [x] Commander CLI with subcommands
-- [x] `seldonclaw simulate` (fully wired)
-- [x] `seldonclaw stats` (fully wired, --tiers option)
+- [x] `publicmachina simulate` (fully wired)
+- [x] `publicmachina stats` (fully wired, --tiers option)
 - [x] Stub commands: run, ingest, analyze, generate, inspect, resume, replay
 - [x] Tests: `index.test.ts` (5 tests)
 
@@ -451,7 +451,7 @@ Historical checklist retained below for traceability. Implementation is complete
 - [ ] Format response
 
 **Verification:**
-- [ ] `seldonclaw interview --actor journalist-01` → coherent response
+- [ ] `publicmachina interview --actor journalist-01` → coherent response
 - [ ] Actor responds "in character" (stance, beliefs reflected)
 
 **EXIT GATE:** Export + report + interview all functional.
@@ -480,7 +480,7 @@ Historical checklist retained below for traceability. Implementation is complete
 - [ ] No INSERT/UPDATE/DELETE without confirmation
 - [ ] No secrets in any output
 
-**EXIT GATE:** `seldonclaw shell` functional. **Project complete.**
+**EXIT GATE:** `publicmachina shell` functional. **Project complete.**
 
 ---
 
@@ -493,7 +493,7 @@ Historical checklist retained below for traceability. Implementation is complete
 | **2: Pipeline** | ingest, ontology, graph, profiles | 4 | Actors in DB from documents |
 | **3: Cognition** | cognition, reproducibility | 3 | decide() end-to-end + replay |
 | **4: Social** | activation, feed, telemetry | 2.5 | Modules testable in isolation |
-| **5: Engine** | engine.ts, index.ts | 3 | **MVP: `seldonclaw run` works** |
+| **5: Engine** | engine.ts, index.ts | 3 | **MVP: `publicmachina run` works** |
 | **6: Dynamics** | propagation, fatigue, events | 2.5 | Simulation with social dynamics |
 | **7: Analysis** | ckp, report, interview | 3.5 | Export + report + interview |
 | **8: Shell** | shell.ts | 1.5 | Conversational REPL |

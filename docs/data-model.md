@@ -1,16 +1,16 @@
-# SeldonClaw Data Model
+# PublicMachina Data Model
 
-This document is the human-readable map of the relational model implemented in [schema.ts](/Users/agc/Documents/seldonclaw/src/schema.ts) and accessed through [store.ts](/Users/agc/Documents/seldonclaw/src/store.ts). It is meant for:
+This document is the human-readable map of the relational model implemented in [schema.ts](/Users/agc/Documents/publicmachina/src/schema.ts) and accessed through [store.ts](/Users/agc/Documents/publicmachina/src/store.ts). It is meant for:
 
 - engineers implementing pipeline and runtime code
 - operator tooling and CLI/shell work
 - future frontend or API layers that need a stable mental model
 
-The companion machine-readable file lives at [data-model.json](/Users/agc/Documents/seldonclaw/docs/data-model.json).
+The companion machine-readable file lives at [data-model.json](/Users/agc/Documents/publicmachina/docs/data-model.json).
 
 ## Layers
 
-SeldonClaw's relational model is organized in five layers:
+PublicMachina's relational model is organized in five layers:
 
 1. **Provenance**
    Documents, chunks, and extracted claims.
@@ -435,8 +435,8 @@ These are not separate tables, but they are important to keep in mind when build
 
 ## Recommended uses
 
-- Use [data-model.md](/Users/agc/Documents/seldonclaw/docs/data-model.md) for human navigation and architecture reviews.
-- Use [data-model.json](/Users/agc/Documents/seldonclaw/docs/data-model.json) for CLI/shell features that need schema-aware behavior:
+- Use [data-model.md](/Users/agc/Documents/publicmachina/docs/data-model.md) for human navigation and architecture reviews.
+- Use [data-model.json](/Users/agc/Documents/publicmachina/docs/data-model.json) for CLI/shell features that need schema-aware behavior:
   - intent routing
   - validation
   - schema introspection

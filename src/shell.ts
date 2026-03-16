@@ -1,5 +1,5 @@
 /**
- * shell.ts — Conversational REPL for the SeldonClaw social simulation engine
+ * shell.ts — Conversational REPL for the PublicMachina social simulation engine
  *
  * Provides an interactive shell that supports:
  *   - Natural language queries (translated to SQL via LLM)
@@ -199,14 +199,14 @@ export async function startShell(ctx: ShellContext, io: ShellIO): Promise<void> 
   const summary = store.getRunRoundSummary(runId);
   const actors = store.getActorsByRun(runId);
 
-  io.output(`SeldonClaw Shell — Run ${runId}\n`);
+  io.output(`PublicMachina Shell — Run ${runId}\n`);
   io.output(`  ${actors.length} actors, ${summary.roundsCompleted} rounds, ${summary.totalPosts} posts\n`);
   io.output(`  Type "help" for commands, "exit" to quit.\n\n`);
 
   const schema = extractSchema(store);
 
   while (true) {
-    io.prompt("seldonclaw> ");
+    io.prompt("publicmachina> ");
     let input: string;
     try {
       input = await io.readline();
