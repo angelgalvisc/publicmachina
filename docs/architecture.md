@@ -1,0 +1,281 @@
+# PublicMachina Architecture
+
+This document holds the technical detail that no longer belongs in the landing-page README.
+
+## Runtime model
+
+PublicMachina is a CLI-first TypeScript runtime with:
+
+- one Node.js process for the operator or pipeline command
+- one SQLite database per run or experiment
+- one optional LLM provider configuration
+- one optional SearXNG endpoint for web-grounded search
+- one optional operator workspace for memory, session history, and simulation records
+
+The product surface is not a sandboxed code runner and not a multi-process agent swarm. It is a typed simulation engine with a conversational operator on top.
+
+## Web-grounded search
+
+PublicMachina lets Tier A and Tier B actors search the real internet during simulation rounds through SearXNG.
+
+### Search flow
+
+```text
+Round N
+  ↓
+Actor activates
+  ↓
+Build search query from topics, events, and feed context
+  ↓
+Check SQLite cache
+  ↓
+Query SearXNG on cache miss
+  ↓
+Apply exact cutoff date after retrieval
+  ↓
+Inject recent web information into the cognition prompt
+  ↓
+Actor decides what to do
+```
+
+### Why cutoff happens after retrieval
+
+SearXNG exposes broad time filtering where engines support it, but PublicMachina applies the exact cutoff itself so a run can be replayed under the same information boundary even when result sources differ in date quality.
+
+### Search configuration
+
+```yaml
+search:
+  enabled: true
+  endpoint: "http://localhost:8888"
+  cutoffDate: "2024-09-15"
+  strictCutoff: true
+  enabledTiers: ["A", "B"]
+  maxActorsPerRound: 4
+  maxActorsByTier:
+    A: 2
+    B: 2
+  allowArchetypes: ["media", "institution"]
+  denyArchetypes: []
+  allowProfessions: ["journalist", "analyst"]
+  denyProfessions: []
+  allowActors: []
+  denyActors: []
+  maxResultsPerQuery: 5
+  maxQueriesPerActor: 2
+  categories: "news"
+  defaultLanguage: "auto"
+  timeoutMs: 3000
+```
+
+### Replay model
+
+Search results are cached in SQLite by query, cutoff, language, and category. That gives you:
+
+- deterministic replay when seed and cache match
+- auditability through `search_requests`
+- offline reruns once results have already been cached
+
+## Cognition tiers
+
+PublicMachina uses tiered cognition to keep cost proportional to agent importance.
+
+| Tier | Strategy | Typical use | Web search |
+|---|---|---|---|
+| `A` | Always LLM | key influencers, journalists, officials | Yes |
+| `B` | Probabilistic LLM | active regular accounts | Yes |
+| `C` | Rules only | background population | No |
+
+Tier routing is deterministic under the run seed. Tier B calls the model stochastically; Tier C stays entirely rule-based.
+
+## Time acceleration
+
+Time acceleration is conservative. PublicMachina only fast-forwards spans where the engine can prove that no meaningful action is happening.
+
+Conditions:
+
+- no recent posts remain in the propagation window
+- no scheduled or active events fire in the skipped span
+- no actors activate during the skipped span
+
+Configuration:
+
+```yaml
+simulation:
+  totalHours: 72
+  minutesPerRound: 60
+  timeAccelerationMode: "fast-forward"
+  maxFastForwardRounds: 24
+```
+
+Skipped spans are written to SQLite so the optimization remains inspectable.
+
+## Platform policy
+
+The engine does not assume a single hardcoded platform. Platform policy controls:
+
+- platform name shown to cognition
+- global action surface
+- tier-specific allowed actions
+- recommendation policy
+- moderation response to reports
+
+```yaml
+platform:
+  name: "x"
+  features:
+    upvoteDownvote: false
+    threads: false
+    characterLimit: 280
+    anonymousPosting: false
+    communitiesUserCreated: false
+  actions:
+    - post
+    - comment
+    - repost
+    - quote
+    - like
+    - unlike
+    - follow
+    - unfollow
+    - mute
+    - block
+    - report
+    - delete
+    - search
+    - idle
+  recsys: "hybrid"
+  tierAllowedActions:
+    A: ["post", "comment", "repost", "quote", "like", "unlike", "follow", "unfollow", "mute", "block", "report", "delete", "search", "idle"]
+    B: ["post", "comment", "repost", "quote", "like", "unlike", "follow", "unfollow", "mute", "report", "delete", "search", "idle"]
+    C: ["post", "comment", "repost", "like", "follow", "unfollow", "idle"]
+  moderation:
+    enabled: true
+    reportThreshold: 3
+    shadowBanOnThreshold: true
+```
+
+## Operator architecture
+
+The conversational operator is layered on top of typed internals.
+
+```text
+User input
+  ↓
+assistant-operator.ts
+  ↓
+/help, /clear, /model, /stop, /exit  → deterministic slash commands
+  ↓
+assistant-planner.ts                 → choose reply vs tool call
+  ↓
+assistant-tools.ts                   → typed tools
+  ↓
+simulation-service.ts                → thin orchestration
+  ↓
+engine.ts                            → simulation loop
+```
+
+The operator also maintains:
+
+- `IDENTITY.md`
+- `SOUL.md`
+- `USER.md`
+- `MEMORY.md`
+- daily notes
+- session transcripts
+- simulation history
+
+Those memories live in the assistant workspace and stay separate from actor memory stored in SQLite.
+
+## Data model
+
+The simulation database centers on:
+
+- `documents`, `chunks`, `claims`
+- `entities`, `edges`
+- `actors`, `beliefs`, `topics`, `memories`
+- `posts`, `exposures`, `rounds`, `runs`
+- `search_cache`, `search_requests`
+- telemetry, embeddings, moderation, and narrative state
+
+The full schema references already live in:
+
+- [data-model.md](./data-model.md)
+- [data-model.json](./data-model.json)
+
+## CKP bundles
+
+PublicMachina uses CKP as a portable actor exchange format, not as its runtime model.
+
+Export bundles include:
+
+- `claw.yaml`
+- `actor_state.json`
+- `beliefs.json`
+- `topics.json`
+- `memories.json`
+- `posts.json`
+- `exposures.json`
+- `decisions.json`
+- `provenance.json`
+- `persona.md`
+- `manifest.meta.json`
+
+What this preserves:
+
+- beliefs and topics
+- lived memory
+- authored posts
+- exposure history
+- decision traces
+
+What it does not preserve yet:
+
+- follow / mute / block graph state
+- full round snapshots and RNG replay state
+- full community state outside the exported actor
+
+## Module map
+
+| Module | Purpose |
+|---|---|
+| `index.ts` | Commander wiring, setup flow, operator entrypoint, and CLI commands |
+| `engine.ts` | Main simulation loop with progress callbacks and cooperative cancellation |
+| `scheduler.ts` | Deterministic bounded-concurrency scheduling |
+| `cognition.ts` | 3-tier cognition router and backend contracts |
+| `search.ts` | SearXNG client, cutoff filtering, and cache logic |
+| `design.ts` | Natural-language brief -> typed spec -> rendered config |
+| `assistant-operator.ts` | Conversational operator loop |
+| `assistant-planner.ts` | Planner that chooses reply vs typed tool |
+| `assistant-tools.ts` | Tool execution layer for design, run, stop, query, report, export, and provider switching |
+| `assistant-workspace.ts` | Workspace bootstrap, identity files, memory, and simulation history |
+| `assistant-state.ts` | Persistent operator state, pending confirmations, run progress, and session spend |
+| `run-control.ts` | Stop requests, active-run locks, and signal bridging |
+| `simulation-service.ts` | Thin orchestration layer for design artifacts and pipeline execution |
+| `profiles.ts` | Actor generation from graph entities |
+| `ontology.ts` | Ontology extraction |
+| `ingest.ts` | Document ingestion and chunking |
+| `graph.ts` | Entity resolution and graph build |
+| `llm.ts` | Multi-provider runtime client |
+| `model-command.ts` | Shared `/model` command logic |
+| `provider-selection.ts` | Provider resolution and role overrides |
+| `query-service.ts` | Read-only SQL helpers |
+| `report.ts` | Report metrics and optional narrative generation |
+| `interview.ts` | Actor interview flows |
+| `ckp.ts` | Actor export and import |
+| `shell.ts` | Interactive REPL for querying completed runs |
+| `config.ts` | YAML config parsing, validation, sanitization, and assistant limits |
+| `store.ts` / `schema.ts` / `db.ts` | SQLite schema and store implementation |
+
+## Project structure
+
+```text
+publicmachina/
+├── src/                    # engine, operator, storage, and runtime modules
+├── tests/                  # automated test suite
+├── docs/                   # architecture and data-model docs
+├── DEPLOYMENT.md           # setup, providers, SearXNG, and operations
+├── CONTRIBUTING.md         # development and testing workflow
+├── PLAN.md                 # active roadmap
+└── IMPLEMENTATION_HISTORY.md
+```

@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="220" viewBox="0 0 900 220" fill="none">
+  <rect width="900" height="220" rx="28" fill="#0B1220"/>
+  <rect x="22" y="22" width="856" height="176" rx="18" fill="url(#bg)"/>
+  <circle cx="88" cy="110" r="38" fill="#F6C945"/>
+  <circle cx="74" cy="98" r="6" fill="#0B1220"/>
+  <circle cx="102" cy="98" r="6" fill="#0B1220"/>
+  <path d="M72 124C78.6667 132 85.3333 136 92 136C98.6667 136 105.333 132 112 124" stroke="#0B1220" stroke-width="6" stroke-linecap="round"/>
+  <text x="150" y="102" fill="#F8FAFC" font-family="Georgia, 'Times New Roman', serif" font-size="54" font-weight="700" letter-spacing="1.5">PublicMachina</text>
+  <text x="152" y="138" fill="#CBD5E1" font-family="'Courier New', monospace" font-size="19" letter-spacing="1.2">social simulation • web-grounded cognition</text>
+  <defs>
+    <linearGradient id="bg" x1="22" y1="22" x2="878" y2="198" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#101A2E"/>
+      <stop offset="1" stop-color="#15233D"/>
+    </linearGradient>
+  </defs>
+</svg>

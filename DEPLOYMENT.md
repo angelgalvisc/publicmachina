@@ -8,7 +8,7 @@ This document covers the active operational surface of PublicMachina:
 - optional SearXNG integration
 - filesystem and secret-handling rules
 
-It complements `README.md` and `PLAN.md`. Historical notes about deferred external runtimes belong in `IMPLEMENTATION_HISTORY.md`, not here.
+It complements `README.md` and [docs/architecture.md](docs/architecture.md). Historical notes about deferred external runtimes belong in `IMPLEMENTATION_HISTORY.md`, not here.
 
 ## Runtime Model
 
@@ -149,6 +149,36 @@ Minimal validation flow:
 curl "http://localhost:8888/search?q=product+recall&format=json"
 publicmachina doctor --config ./publicmachina.config.yaml
 ```
+
+### Search policy configuration
+
+Use this when you want agents in Tier A and B to search the internet during runs:
+
+```yaml
+search:
+  enabled: true
+  endpoint: "http://localhost:8888"
+  cutoffDate: "2024-09-15"
+  strictCutoff: true
+  enabledTiers: ["A", "B"]
+  maxActorsPerRound: 4
+  maxActorsByTier:
+    A: 2
+    B: 2
+  allowArchetypes: ["media", "institution"]
+  denyArchetypes: []
+  allowProfessions: ["journalist", "analyst"]
+  denyProfessions: []
+  allowActors: []
+  denyActors: []
+  maxResultsPerQuery: 5
+  maxQueriesPerActor: 2
+  categories: "news"
+  defaultLanguage: "auto"
+  timeoutMs: 3000
+```
+
+PublicMachina applies the exact `cutoffDate` itself after retrieval so the same run can be replayed under the same information boundary.
 
 ## Container Example
 
