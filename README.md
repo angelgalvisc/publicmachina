@@ -177,7 +177,10 @@ The design layer uses LLM to propose actors and communities from the brief and s
 | `setup` / `init` | Guided provider, workspace, and model setup |
 | `assistant` | Start the operator explicitly |
 | `design` | Turn a natural-language brief into a spec + generated config |
-| `run` | Full pipeline: ingest -> analyze -> generate -> simulate |
+| `run` | Full pipeline: ingest -> analyze -> generate -> simulate (accepts `--spec` for cast design) |
+| `ingest` | Document ingestion and chunking phase |
+| `analyze` | Ontology extraction and graph build phase |
+| `generate` | Profile generation from graph entities and cast seeds |
 | `simulate` | Run an existing simulation |
 | `stop` | Request a graceful stop for the active run |
 | `stats` | Print run metrics and tier breakdown |

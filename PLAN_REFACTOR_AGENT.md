@@ -106,7 +106,7 @@ Este mecanismo ya existe parcialmente en `buildProfileCandidates` (`profiles.ts`
 
 ---
 
-## Paso 0: Extraer `mapWithConcurrency` a módulo compartido
+## Paso 0: Extraer `mapWithConcurrency` a módulo compartido ✅
 
 **Archivos:**
 - **CREAR** `src/concurrency.ts` — mover función de `src/scheduler.ts:236-263`
@@ -117,7 +117,7 @@ Puro refactor. Pasos 4, 6 y 7 dependen de esto.
 
 ---
 
-## Paso 1: Extender `SimulationSpec` y crear contrato `CastDesign`
+## Paso 1: Extender `SimulationSpec` y crear contrato `CastDesign` ✅
 
 **Archivos:**
 - **MODIFICAR** `src/design.ts` — nuevos tipos
@@ -191,7 +191,7 @@ Esto resuelve **P1**: el cast design tiene los docs descargados disponibles.
 
 ---
 
-## Paso 2: Entity typing con hints del cast design + ranking (Gap 2)
+## Paso 2: Entity typing con hints del cast design + ranking (Gap 2) ✅
 
 **Archivos:** `src/graph.ts`, `src/profiles.ts`
 
@@ -217,7 +217,7 @@ Donde `edgeCount` se obtiene del store (edges donde la entidad es source o targe
 
 ---
 
-## Paso 3: Comunidades desde propuestas del cast design (Gap 3)
+## Paso 3: Comunidades desde propuestas del cast design (Gap 3) ✅
 
 **Archivo:** `src/profiles.ts`
 
@@ -233,7 +233,7 @@ En `generateProfiles` (~línea 305): usar propuestas si existen, sino fallback.
 
 ---
 
-## Paso 4: Seed posts generados por LLM (Gap 1)
+## Paso 4: Seed posts generados por LLM (Gap 1) ✅
 
 **Archivo:** `src/profiles.ts`
 
@@ -252,7 +252,7 @@ Reestructurar bloque de seed posts (~líneas 368-399):
 
 ---
 
-## Paso 5: Search activation via `allowActors` (Gap 5)
+## Paso 5: Search activation via `allowActors` (Gap 5) ✅
 
 **Archivo:** `src/assistant-tools.ts` (o donde se construye la search config para el pipeline)
 
@@ -269,7 +269,7 @@ Esto resuelve **P2 (search)**: no se mezclan contratos.
 
 ---
 
-## Paso 6: Paralelizar claims extraction + concurrencia configurable
+## Paso 6: Paralelizar claims extraction + concurrencia configurable ✅
 
 **Archivos:**
 - **MODIFICAR** `src/ontology.ts`
@@ -301,7 +301,7 @@ Esto resuelve **P2 (concurrencia)**: configurable por el usuario, no hardcodeado
 
 ---
 
-## Paso 7: Paralelizar profile generation con tracing
+## Paso 7: Paralelizar profile generation con tracing ✅
 
 **Archivo:** `src/profiles.ts`
 
@@ -329,7 +329,7 @@ Cada fase paralela registra su trace via `recordAssistantTrace` (si está dispon
 
 ---
 
-## Paso 8: Threading end-to-end
+## Paso 8: Threading end-to-end ✅
 
 **Archivos:**
 - `src/simulation-service.ts` — agregar `castDesign?: CastDesign` a `ExecutePipelineInput`; pasar `entityTypeHints` a `buildKnowledgeGraph`, `castSeeds` + `communityProposals` a `generateProfiles`, cast seed names a search `allowActors`

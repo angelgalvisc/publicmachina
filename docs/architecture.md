@@ -241,7 +241,7 @@ What it does not preserve yet:
 |---|---|
 | `index.ts` | Commander wiring, setup flow, operator entrypoint, and CLI commands |
 | `engine.ts` | Main simulation loop with progress callbacks and cooperative cancellation |
-| `scheduler.ts` | Deterministic bounded-concurrency scheduling |
+| `scheduler.ts` | Round scheduling, activation batching, and tier-based actor resolution |
 | `cognition.ts` | 3-tier cognition router and backend contracts |
 | `search.ts` | SearXNG client, cutoff filtering, and cache logic |
 | `design.ts` | Natural-language brief -> typed spec -> rendered config |

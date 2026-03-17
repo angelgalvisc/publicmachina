@@ -2,7 +2,7 @@
  * assistant-tools.ts — Typed tools for the PublicMachina operator planner.
  */
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { SQLiteGraphStore, uuid } from "./db.js";
 import type { SimConfig } from "./config.js";
@@ -1101,7 +1101,6 @@ function persistCastDesign(specPath: string, castDesign: import("./design.js").C
 function readSourceDocSummaries(docsPath: string, maxChars = 800): string[] {
   if (!docsPath || !existsSync(docsPath)) return [];
   try {
-    const { readdirSync } = require("node:fs") as typeof import("node:fs");
     const files = readdirSync(docsPath)
       .filter((f: string) => f.endsWith(".md") || f.endsWith(".txt"))
       .sort();

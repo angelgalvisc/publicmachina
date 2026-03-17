@@ -267,7 +267,12 @@ erDiagram
     int round_num
     text actor_id FK
     text query
+    text cutoff_date
+    text language
+    text categories
+    int result_count
     int cache_hit
+    text created_at
   }
   SEARCH_CACHE {
     text id PK
@@ -275,6 +280,9 @@ erDiagram
     text cutoff_date
     text language
     text categories
+    text results
+    text fetched_at
+    text run_id
   }
 ```
 
@@ -331,7 +339,11 @@ erDiagram
     text actor_id FK
     text query
     text cutoff_date
+    text language
+    text categories
     int result_count
+    int cache_hit
+    text created_at
   }
   SKIPPED_ROUNDS {
     text id PK
@@ -346,7 +358,11 @@ erDiagram
     text id PK
     text query
     text cutoff_date
+    text language
+    text categories
+    text results
     text fetched_at
+    text run_id
   }
 ```
 
@@ -413,9 +429,14 @@ erDiagram
   COMMUNITIES ||--o{ COMMUNITY_OVERLAP : community_b
 
   SEARCH_CACHE {
-    id TEXT
-    query TEXT
-    cutoff_date TEXT
+    text id PK
+    text query
+    text cutoff_date
+    text language
+    text categories
+    text results
+    text fetched_at
+    text run_id
   }
 ```
 
@@ -431,6 +452,7 @@ erDiagram
 - `posts.is_deleted = 1` soft-deletes content without removing audit history.
 - `posts.moderation_status = 'shadowed'` removes content from feed and propagation projections.
 - `entities.merged_into IS NULL` means the entity is active and should appear in search/build steps.
+- `follows`, `mutes`, and `blocks` have FK constraints on `run_id` but **not** on actor columns (`follower_id`, `following_id`, `actor_id`, `muted_actor_id`, `blocked_actor_id`). This is a deliberate trade-off: SQLite FK enforcement is off by default in PublicMachina to avoid performance overhead during bulk writes. Referential integrity for actor references is maintained by the application layer (`profiles.ts`, `engine.ts`).
 - `exposure_summary` is a view over `exposures`, not a source-of-truth table.
 
 ## Runtime projections

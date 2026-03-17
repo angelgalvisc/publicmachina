@@ -29,9 +29,9 @@ import { ingestDirectory } from "./ingest.js";
 import { extractOntology } from "./ontology.js";
 import { buildKnowledgeGraph } from "./graph.js";
 import { generateProfiles } from "./profiles.js";
-import { designSimulationFromBrief } from "./design.js";
+import { designSimulationFromBrief, type CastDesign } from "./design.js";
 import { checkSearchHealth, createSearchProvider } from "./search.js";
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 import pc from "picocolors";
 import {
@@ -1067,6 +1067,7 @@ async function runPipelineCommand(
     seed?: string;
     config?: string;
     run?: string;
+    spec?: string;
     mock?: boolean;
   },
   io: CliIO
@@ -1088,12 +1089,22 @@ async function runPipelineCommand(
   });
   let result!: Awaited<ReturnType<typeof executePipeline>>;
   try {
+    // Read castDesign from spec if available
+    let castDesign: CastDesign | undefined;
+    if (opts.spec && existsSync(opts.spec)) {
+      try {
+        const specData = JSON.parse(readFileSync(opts.spec, "utf-8")) as { castDesign?: CastDesign };
+        castDesign = specData.castDesign ?? undefined;
+      } catch { /* Non-fatal */ }
+    }
+
     result = await executePipeline({
       config,
       dbPath: opts.db,
       docsPath: opts.docs,
       runId,
       hypothesis: opts.hypothesis,
+      castDesign,
       mock: opts.mock,
       signal: stopMonitor.signal,
       shouldStop: stopMonitor.shouldStop,
@@ -1354,6 +1365,7 @@ export function createProgram(io: CliIO = defaultIO): Command {
     .option("--seed <n>", "PRNG seed")
     .option("--config <path>", "config YAML file")
     .option("--run <id>", "run ID")
+    .option("--spec <path>", "simulation spec JSON (provides cast design if available)")
     .option("--mock", "use mock LLM + mock cognition backend")
     .action(async (opts) => {
       await runPipelineCommand(opts, io);
