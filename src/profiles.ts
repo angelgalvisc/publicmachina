@@ -253,20 +253,45 @@ export async function generateProfiles(
   const concurrency = Math.max(1, options.pipelineConcurrency ?? 1);
 
   // Phase 1: Generate profiles via LLM with bounded concurrency
+  const profileT0 = Date.now();
+  let profileFailures = 0;
   const profileResults = await mapWithConcurrency(
     candidates,
     concurrency,
     async (candidate) => {
-      const profile = await generateSingleProfile(
-        llm,
-        candidate.entity,
-        candidate.claimTexts,
-        hypothesis,
-        platform
-      );
-      return { candidate, profile };
+      try {
+        const profile = await generateSingleProfile(
+          llm,
+          candidate.entity,
+          candidate.claimTexts,
+          hypothesis,
+          platform
+        );
+        return { candidate, profile };
+      } catch (err) {
+        profileFailures++;
+        throw err;
+      }
     }
   );
+  const profileTrace = {
+    phase: "profiles" as const,
+    totalItems: candidates.length,
+    concurrency,
+    completedItems: profileResults.length,
+    failedItems: profileFailures,
+    wallTimeMs: Date.now() - profileT0,
+  };
+  try {
+    store.logTelemetry({
+      run_id: runId,
+      round_num: -1,
+      action_type: "pipeline_trace",
+      action_detail: JSON.stringify(profileTrace),
+    });
+  } catch {
+    // Non-fatal: tracing is best-effort
+  }
 
   // Phase 2: Persist to DB sequentially (better-sqlite3 is synchronous)
   const peakHours = config?.simulation?.peakHours ?? [8, 9, 10, 12, 13, 19, 20, 21, 22];
@@ -401,11 +426,37 @@ export async function generateProfiles(
     }
   }
 
+  const seedT0 = Date.now();
+  let seedFailures = 0;
   const seedContents = await mapWithConcurrency(
     seedJobs,
     concurrency,
-    async (job) => generateSeedPostContent(llm, job.actor, job.topTopic, hypothesis, platform)
+    async (job) => {
+      try {
+        return await generateSeedPostContent(llm, job.actor, job.topTopic, hypothesis, platform);
+      } catch {
+        seedFailures++;
+        return `[Seed post about ${job.topTopic} by ${job.actor.name}]`;
+      }
+    }
   );
+  try {
+    store.logTelemetry({
+      run_id: runId,
+      round_num: -1,
+      action_type: "pipeline_trace",
+      action_detail: JSON.stringify({
+        phase: "seed_posts",
+        totalItems: seedJobs.length,
+        concurrency,
+        completedItems: seedJobs.length - seedFailures,
+        failedItems: seedFailures,
+        wallTimeMs: Date.now() - seedT0,
+      }),
+    });
+  } catch {
+    // Non-fatal
+  }
 
   let seedPostsCreated = 0;
   for (let i = 0; i < seedJobs.length; i++) {

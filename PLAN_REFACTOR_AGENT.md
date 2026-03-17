@@ -390,6 +390,51 @@ Cada paso es un commit independiente. Tests existentes no se rompen.
 
 ---
 
+## Checklist de auditoría post-implementación
+
+Ejecutar después de la primera simulación real con el pipeline nuevo.
+
+### P1: allowActors no sobrehabilita búsqueda
+- [ ] Correr simulación con policy explícita (ej: `allow search for technology journalists, macro traders`)
+- [ ] Inspeccionar `config_snapshot` en `run_manifest` → verificar que `allowActors` solo tiene seeds cuyo role matchea la policy
+- [ ] Verificar que seeds corporativos/institucionales/observers NO buscan
+- **Fix aplicado**: `simulation-service.ts` ahora filtra seeds por role match contra allowProfessions/allowArchetypes
+
+### P2: docSummaries tienen señal real
+- [ ] Inspeccionar qué recibe `designCast()` — correr con logging temporario
+- [ ] Revisar 3-5 docSummaries de una simulación real
+- [ ] Verificar que contienen: título, señal narrativa, entidades relevantes — no solo encabezado
+- **Fix aplicado**: `readSourceDocSummaries` ahora skipea boilerplate (Source URL, headers cortos) y toma 800 chars de párrafos sustantivos
+
+### P3: política efectiva de search persistida
+- [ ] Verificar en `run_manifest.config_snapshot` que los `allowActors` derivados están visibles
+- [ ] Verificar en `simulation.spec.json` que `castDesign` está persistido
+- [ ] Confirmar consistencia entre preview, spec, y config del run
+- **Estado**: `run_manifest` ya persiste el config completo con allowActors mutados; `castDesign` se persiste en el spec JSON
+
+### P4: tracing de concurrencia tiene sink estable
+- [ ] Después de un run, consultar: `SELECT * FROM telemetry WHERE action_type = 'pipeline_trace'`
+- [ ] Verificar que registra: phase, totalItems, completedItems, failedItems, wallTimeMs, concurrency
+- [ ] Verificar que seed_posts failures quedan contados
+- **Fix aplicado**: `logTelemetry` con `action_type: "pipeline_trace"` en profiles (profiles + seed_posts phases)
+
+### P5 (cerrada): secuencia source docs → cast design
+- [x] `designCast()` corre después de `materializeSourceDocs()` — verificado en `assistant-tools.ts`
+
+### P6 (cerrada): separación CastSeed vs EntityTypeHint
+- [x] `CastSeed` → profiles/search/comunidades; `EntityTypeHint` → graph typing — verificado
+
+### P7 (menor): entity ranking respeta prioridad
+- [ ] Verificar que focusActors aparecen primero en el actor list del DB
+- [ ] Verificar que castSeeds aparecen segundo
+- [ ] Verificar que graph entities complementan, no desplazan
+
+### P8 (menor): pipelineConcurrency viene de config
+- [ ] Grep por `mapWithConcurrency` — verificar que ningún call usa literal hardcodeado
+- [ ] Verificar que `pipelineConcurrency` aparece en `publicmachina.generated.config.yaml`
+
+---
+
 ## Lo que NO se hace en este refactor
 
 - **No** se agrega LLM en graph.ts — el graph es determinista, recibe hints del cast design

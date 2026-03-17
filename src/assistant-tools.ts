@@ -1093,7 +1093,12 @@ function persistCastDesign(specPath: string, castDesign: import("./design.js").C
   }
 }
 
-function readSourceDocSummaries(docsPath: string, maxChars = 500): string[] {
+/**
+ * Extract meaningful summaries from downloaded source documents.
+ * Skips title/URL boilerplate and takes the first substantive paragraphs
+ * to maximize signal for cast design.
+ */
+function readSourceDocSummaries(docsPath: string, maxChars = 800): string[] {
   if (!docsPath || !existsSync(docsPath)) return [];
   try {
     const { readdirSync } = require("node:fs") as typeof import("node:fs");
@@ -1102,11 +1107,39 @@ function readSourceDocSummaries(docsPath: string, maxChars = 500): string[] {
       .sort();
     return files.map((file: string) => {
       const content = readFileSync(join(docsPath, file), "utf-8");
-      return content.slice(0, maxChars);
-    });
+      return extractDocSummary(content, maxChars);
+    }).filter((s) => s.length >= 50);
   } catch {
     return [];
   }
+}
+
+function extractDocSummary(content: string, maxChars: number): string {
+  const lines = content.split("\n");
+  const parts: string[] = [];
+  let charCount = 0;
+
+  // Capture the title (first heading)
+  const titleLine = lines.find((l) => l.startsWith("# "));
+  if (titleLine) {
+    parts.push(titleLine);
+    charCount += titleLine.length;
+  }
+
+  // Skip past headers, "Source URL:", and short boilerplate lines
+  // to find substantive paragraphs with real content
+  for (const line of lines) {
+    if (charCount >= maxChars) break;
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    if (trimmed.startsWith("#")) continue;
+    if (trimmed.startsWith("Source URL:")) continue;
+    if (trimmed.length < 30) continue; // Skip short metadata lines
+    parts.push(trimmed);
+    charCount += trimmed.length;
+  }
+
+  return parts.join("\n").slice(0, maxChars);
 }
 
 async function fetchSourceDocument(url: string): Promise<{ title: string; content: string }> {

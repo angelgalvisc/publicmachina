@@ -289,13 +289,32 @@ export async function executePipeline(
       shouldStop: input.shouldStop,
       message: "Simulation stop requested before the simulation engine started.",
     });
-    // Inject cast seed names into search allowActors so search activation works
+    // Inject search-eligible cast seed names into allowActors.
+    // Only seeds whose role or type aligns with the spec's search policy
+    // are eligible — avoids sobrehabilitation of corporate/institutional seeds.
     if (input.castDesign?.castSeeds?.length) {
-      const castNames = input.castDesign.castSeeds.map((s) => s.name);
+      const allowedProfessions = new Set(config.search.allowProfessions.map((p) => p.toLowerCase().trim()));
+      const allowedArchetypes = new Set(config.search.allowArchetypes.map((a) => a.toLowerCase().trim()));
       const existing = new Set(config.search.allowActors.map((a) => a.toLowerCase()));
-      for (const name of castNames) {
-        if (!existing.has(name.toLowerCase())) {
-          config.search.allowActors.push(name);
+      const hasPolicy = allowedProfessions.size > 0 || allowedArchetypes.size > 0;
+
+      for (const seed of input.castDesign.castSeeds) {
+        if (existing.has(seed.name.toLowerCase())) continue;
+        if (!hasPolicy) {
+          // No explicit policy: all seeds eligible
+          config.search.allowActors.push(seed.name);
+          existing.add(seed.name.toLowerCase());
+          continue;
+        }
+        // Check if seed's role matches allowProfessions
+        const role = seed.role.toLowerCase().trim();
+        const type = seed.type.toLowerCase().trim();
+        const roleMatch = allowedProfessions.has(role) ||
+          [...allowedProfessions].some((p) => role.includes(p) || p.includes(role));
+        const typeMatch = allowedArchetypes.has(type);
+        if (roleMatch || typeMatch) {
+          config.search.allowActors.push(seed.name);
+          existing.add(seed.name.toLowerCase());
         }
       }
     }
