@@ -60,6 +60,7 @@ export interface EngineResult {
   completedRounds: number;
   status: "completed" | "failed" | "cancelled";
   wallTimeMs: number;
+  failureMessage?: string | null;
 }
 
 export interface EngineRoundProgress {
@@ -538,6 +539,7 @@ export async function runSimulation(opts: EngineOptions): Promise<EngineResult> 
       completedRounds,
       status: "completed",
       wallTimeMs: Date.now() - t0,
+      failureMessage: null,
     };
   } catch (err) {
     if (err instanceof SimulationCancelledError) {
@@ -553,8 +555,15 @@ export async function runSimulation(opts: EngineOptions): Promise<EngineResult> 
         completedRounds,
         status: "cancelled",
         wallTimeMs: Date.now() - t0,
+        failureMessage: null,
       };
     }
+    const failureMessage =
+      err instanceof Error
+        ? [err.name, err.message, err.stack?.split("\n").slice(0, 4).join("\n")]
+            .filter(Boolean)
+            .join(": ")
+        : String(err);
     store.updateRun(runId, {
       status: "failed",
       finished_at: new Date().toISOString(),
@@ -566,6 +575,7 @@ export async function runSimulation(opts: EngineOptions): Promise<EngineResult> 
       completedRounds,
       status: "failed",
       wallTimeMs: Date.now() - t0,
+      failureMessage,
     };
   } finally {
     await backend.shutdown();

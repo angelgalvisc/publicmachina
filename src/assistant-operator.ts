@@ -223,6 +223,20 @@ export async function startAssistantOperator(
       continue;
     }
 
+    if (looksLikeDesignContinuationFragment(input, taskState)) {
+      recordAssistantTrace(session, "input_fragment_detected", {
+        length: input.length,
+        activeDesignTitle: taskState.activeDesign?.title ?? null,
+        activeDesignBriefLength: taskState.activeDesign?.brief.length ?? 0,
+      });
+      const message =
+        "I kept the current design because this input looks like a continuation fragment of the brief I already captured. Tell me to run it, or describe the refinement you want.";
+      io.stdout(`${message}\n`);
+      recordAssistantMessage(session, conversation, "assistant", message);
+      nextInput = await prompt.ask(`[${preferredName}]`, "", { multiline: true });
+      continue;
+    }
+
     recordAssistantMessage(session, conversation, "user", input);
     recordAssistantTrace(session, "input_received", {
       length: input.length,
@@ -343,6 +357,26 @@ export async function startAssistantOperator(
 
     nextInput = await prompt.ask(`[${preferredName}]`, "", { multiline: true });
   }
+}
+
+function looksLikeDesignContinuationFragment(
+  input: string,
+  taskState: AssistantTaskState
+): boolean {
+  const activeDesign = taskState.activeDesign;
+  if (!activeDesign) return false;
+  if (!["designed", "awaiting_confirmation"].includes(taskState.status)) return false;
+  if (input.length < 80 || input.length >= activeDesign.brief.length) return false;
+  if (!activeDesign.brief.includes(input)) return false;
+
+  const ageMs = Date.now() - Date.parse(taskState.updatedAt);
+  if (!Number.isFinite(ageMs) || ageMs > 2 * 60 * 1000) return false;
+
+  if (/^(\/|run\b|yes\b|no\b|stop\b|query\b|report\b|interview\b|compare\b)/i.test(input)) {
+    return false;
+  }
+
+  return true;
 }
 
 function requireWorkspace(config: SimConfig, configPath: string): AssistantWorkspaceLayout {

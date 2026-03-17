@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
@@ -44,5 +44,39 @@ describe("simulation-service.ts", () => {
     expect(result.status).toBe("completed");
     expect(result.actorsCreated).toBe(1);
     expect(actors).toHaveLength(1);
+  });
+
+  it("creates actors from focusActors even when the docs directory has no source documents", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "publicmachina-simulation-service-"));
+    tempDirs.push(dir);
+
+    const config = defaultConfig();
+    config.simulation.totalHours = 1;
+    config.simulation.minutesPerRound = 60;
+
+    const docsPath = join(dir, "empty-docs");
+    mkdirSync(docsPath, { recursive: true });
+
+    const dbPath = join(dir, "simulation.db");
+    const result = await executePipeline({
+      config,
+      dbPath,
+      docsPath,
+      runId: "focus-actors-run",
+      actorCount: 2,
+      focusActors: ["macro traders", "technology journalists"],
+      mock: true,
+    });
+
+    const store = new SQLiteGraphStore(dbPath);
+    const actors = store.getActorsByRun("focus-actors-run");
+    store.close();
+
+    expect(result.status).toBe("completed");
+    expect(result.actorsCreated).toBe(2);
+    expect(actors.map((actor) => actor.name)).toEqual([
+      "macro traders",
+      "technology journalists",
+    ]);
   });
 });

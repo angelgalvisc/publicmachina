@@ -53,6 +53,7 @@ export interface ExecutePipelineInput {
   runId?: string;
   hypothesis?: string | null;
   actorCount?: number | null;
+  focusActors?: string[];
   mock?: boolean;
   callbacks?: PipelineCallbacks;
   signal?: AbortSignal;
@@ -69,6 +70,7 @@ export interface PipelineExecutionResult {
   actorsCreated: number;
   claimsExtracted: number;
   entitiesCreated: number;
+  failureMessage?: string | null;
 }
 
 export interface RunEstimate {
@@ -266,6 +268,7 @@ export async function executePipeline(
         runId,
         hypothesis: input.hypothesis ?? undefined,
         maxActors: input.actorCount ?? 0,
+        focusActors: input.focusActors ?? [],
         platform: config.simulation.platform,
       },
       config
@@ -303,6 +306,7 @@ export async function executePipeline(
       actorsCreated,
       claimsExtracted,
       entitiesCreated,
+      failureMessage: result.failureMessage ?? null,
     };
   } catch (err) {
     if (err instanceof SimulationCancelledError) {
@@ -326,6 +330,7 @@ export async function executePipeline(
         actorsCreated,
         claimsExtracted,
         entitiesCreated,
+        failureMessage: null,
       };
     }
     throw err;

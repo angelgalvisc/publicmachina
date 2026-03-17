@@ -361,6 +361,22 @@ describe("generateProfiles", () => {
     expect(result.actorsCreated).toBe(2);
   });
 
+  it("creates operator-requested focus actors even when they are not in the graph", async () => {
+    const result = await generateProfiles(store, llm, {
+      runId,
+      maxActors: 2,
+      focusActors: ["macro traders", "technology journalists"],
+    });
+
+    expect(result.actorsCreated).toBe(2);
+    const actors = store.getActorsByRun(runId);
+    expect(actors.map((actor) => actor.name)).toEqual([
+      "macro traders",
+      "technology journalists",
+    ]);
+    expect(actors.every((actor) => actor.entity_id === null)).toBe(true);
+  });
+
   it("actors have sentiment_bias in [-1, 1]", async () => {
     await generateProfiles(store, llm, { runId });
 

@@ -55,6 +55,8 @@ export interface ProfilesOptions {
   hypothesis?: string;
   /** Max actors to generate (0 = all entities, default: 0) */
   maxActors?: number;
+  /** User-specified actor seeds that must be present when possible */
+  focusActors?: string[];
   /** Platform (default: "x") */
   platform?: string;
   /** Initial follow density: probability two actors follow each other (default: 0.3) */
@@ -70,6 +72,12 @@ export interface ProfilesResult {
   communitiesCreated: number;
   followsCreated: number;
   seedPostsCreated: number;
+}
+
+interface ProfileCandidate {
+  entity: Entity;
+  entityId: string | null;
+  claimTexts: string[];
 }
 
 // ═══════════════════════════════════════════════════════
@@ -211,19 +219,15 @@ export async function generateProfiles(
     runId,
     hypothesis = "Social scenario simulation",
     maxActors = 0,
+    focusActors = [],
     platform = "x",
     followDensity = 0.3,
     seedPostsPerKeyActor = 1,
     simStartTime = new Date().toISOString(),
   } = options;
 
-  // 1. Load active entities
-  let entities = store.getAllActiveEntities();
-  if (maxActors > 0 && entities.length > maxActors) {
-    entities = entities.slice(0, maxActors);
-  }
-
-  if (entities.length === 0) {
+  const candidates = buildProfileCandidates(store, focusActors, maxActors);
+  if (candidates.length === 0) {
     return {
       actorsCreated: 0,
       communitiesCreated: 0,
@@ -237,13 +241,8 @@ export async function generateProfiles(
   const actorTopicsMap = new Map<string, Array<{ topic: string; weight: number }>>();
   const actorArchetypes = new Map<string, string>();
 
-  for (const entity of entities) {
-    // Get claims for context
-    const provenance = store.queryProvenance(entity.id);
-    const claimTexts = provenance.claims.map(
-      (c) => `${c.subject} ${c.predicate} ${c.object}`
-    );
-
+  for (const candidate of candidates) {
+    const { entity, entityId, claimTexts } = candidate;
     // Generate profile via LLM
     const profile = await generateSingleProfile(
       llm,
@@ -268,7 +267,7 @@ export async function generateProfiles(
     const actorId = store.addActor({
       id: stableId(runId, "actor", entity.id),
       run_id: runId,
-      entity_id: entity.id,
+      entity_id: entityId,
       archetype,
       cognition_tier: cognitionTier,
       name: entity.name,
@@ -405,6 +404,101 @@ export async function generateProfiles(
     followsCreated,
     seedPostsCreated,
   };
+}
+
+function buildProfileCandidates(
+  store: GraphStore,
+  focusActors: string[],
+  maxActors: number
+): ProfileCandidate[] {
+  const rankedEntities = store
+    .getAllActiveEntities()
+    .map((entity) => {
+      const claimTexts = store
+        .queryProvenance(entity.id)
+        .claims.map((claim) => `${claim.subject} ${claim.predicate} ${claim.object}`);
+      return {
+        entity,
+        entityId: entity.id,
+        claimTexts,
+        rank: claimTexts.length,
+      };
+    })
+    .sort((a, b) => b.rank - a.rank || a.entity.name.localeCompare(b.entity.name));
+
+  const candidates: ProfileCandidate[] = [];
+  const seen = new Set<string>();
+
+  for (const focusActor of focusActors) {
+    const normalized = normalizeCandidateName(focusActor);
+    if (!normalized || seen.has(normalized)) continue;
+
+    const matchedEntity = rankedEntities.find(
+      (candidate) => normalizeCandidateName(candidate.entity.name) === normalized
+    );
+    if (matchedEntity) {
+      candidates.push({
+        entity: matchedEntity.entity,
+        entityId: matchedEntity.entityId,
+        claimTexts: matchedEntity.claimTexts,
+      });
+      seen.add(normalized);
+      continue;
+    }
+
+    candidates.push({
+      entity: createFocusActorSeedEntity(focusActor),
+      entityId: null,
+      claimTexts: [`Operator-designated focus actor: ${focusActor}`],
+    });
+    seen.add(normalized);
+  }
+
+  for (const candidate of rankedEntities) {
+    const normalized = normalizeCandidateName(candidate.entity.name);
+    if (!normalized || seen.has(normalized)) continue;
+    candidates.push({
+      entity: candidate.entity,
+      entityId: candidate.entityId,
+      claimTexts: candidate.claimTexts,
+    });
+    seen.add(normalized);
+  }
+
+  return maxActors > 0 ? candidates.slice(0, maxActors) : candidates;
+}
+
+function createFocusActorSeedEntity(label: string): Entity {
+  const normalizedLabel = label.trim();
+  const entityType = inferFocusActorEntityType(normalizedLabel);
+  return {
+    id: stableId("focus-actor", normalizedLabel),
+    type: entityType,
+    name: normalizedLabel,
+    attributes: JSON.stringify({
+      requested_role: normalizedLabel,
+      source: "focus_actor_seed",
+    }),
+    merged_into: null,
+  };
+}
+
+function inferFocusActorEntityType(label: string): string {
+  const normalized = label.toLowerCase();
+  if (/\b(journalist|journalists|media|commentator|commentators|editor|editors|outlet)\b/.test(normalized)) {
+    return "media";
+  }
+  if (/\b(regulator|regulators|government|ministry|agency|institution|institutions|etf ecosystem)\b/.test(normalized)) {
+    return "institution";
+  }
+  if (/\b(company|companies|organization|organizations|market makers|market maker|miners)\b/.test(normalized)) {
+    return "organization";
+  }
+  return "person";
+}
+
+function normalizeCandidateName(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
 // ═══════════════════════════════════════════════════════

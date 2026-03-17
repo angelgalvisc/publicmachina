@@ -143,4 +143,69 @@ describe("assistant-operator.ts", () => {
     expect(sessionText).toContain('"name":"tool_result"');
     expect(statuses.join("")).toContain("I will keep using your last context unless you tell me to change it");
   });
+
+  it("does not overwrite a fresh design with a continuation fragment from the same brief", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "publicmachina-assistant-operator-"));
+    tempDirs.push(dir);
+
+    const config = defaultConfig();
+    config.assistant.workspaceDir = join(dir, "workspace");
+    const configPath = join(dir, "publicmachina.config.yaml");
+    saveConfig(configPath, config);
+
+    const workspace = resolveAssistantWorkspace(config, { configPath });
+    bootstrapAssistantWorkspace(workspace, config);
+    updateUserProfile(workspace, {
+      preferredName: "Angel",
+      lastContext: "Crypto markets and AI narrative analysis",
+    });
+
+    const outputs: string[] = [];
+    const answers = [
+      "yes",
+      [
+        "Design a new simulation from scratch.",
+        "",
+        "Title:",
+        "Narrative impact of NemoClaw on Bitcoin",
+        "",
+        "Objective:",
+        "Measure whether the effect is material or mostly narrative noise.",
+        "",
+        "Primary source:",
+        "https://es.wired.com/articulos/nvidia-lanzara-una-plataforma-de-agentes-de-ia-de-codigo-abierto",
+        "",
+        "Configuration:",
+        "- 10 actors",
+        "- 16 rounds",
+      ].join("\n"),
+      [
+        "Primary source:",
+        "https://es.wired.com/articulos/nvidia-lanzara-una-plataforma-de-agentes-de-ia-de-codigo-abierto",
+        "",
+        "Configuration:",
+        "- 10 actors",
+        "- 16 rounds",
+      ].join("\n"),
+      "/exit",
+    ];
+
+    await startAssistantOperator({
+      config,
+      configPath,
+      mock: true,
+      io: {
+        stdout: (text) => outputs.push(text),
+        stderr: (text) => outputs.push(text),
+      },
+      prompt: {
+        ask: async () => answers.shift() ?? "",
+      },
+    });
+
+    const combined = outputs.join("");
+    expect(combined).toContain('Designed "Narrative impact of NemoClaw on Bitcoin"');
+    expect(combined).toContain("I kept the current design because this input looks like a continuation fragment");
+    expect(combined).not.toContain('Designed "Explore how narratives evolve across actors under the requested scenario"');
+  });
 });

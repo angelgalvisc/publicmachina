@@ -280,15 +280,22 @@ async function designSimulationTool(
     workspace: runtime.workspace,
   });
 
-  const docsPath =
-    result.spec.docsPath ??
-    materializeBriefSourceDocs(runtime.workspace, {
+  const materializedDocs =
+    result.spec.docsPath
+      ? {
+          docsPath: result.spec.docsPath,
+          referencedUrlCount: result.spec.sourceUrls.length,
+          downloadedCount: 0,
+          warnings: [] as string[],
+        }
+      : await materializeSourceDocs(runtime.workspace, {
       title: result.spec.title,
-      brief,
       objective: result.spec.objective,
       hypothesis: result.spec.hypothesis,
+      sourceUrls: result.spec.sourceUrls,
       artifactDir: result.historyRecord?.workspaceDir ?? result.artifactDir,
     });
+  const docsPath = materializedDocs.docsPath;
 
   if (docsPath !== result.spec.docsPath) {
     persistDesignedDocsPath(result.specPath, docsPath);
@@ -331,6 +338,10 @@ async function designSimulationTool(
       `Spec: ${result.specPath}`,
       `Config: ${result.configPath}`,
       `Source docs: ${docsPath}`,
+      materializedDocs.referencedUrlCount > 0
+        ? `Downloaded source documents: ${materializedDocs.downloadedCount}/${materializedDocs.referencedUrlCount}`
+        : "Downloaded source documents: 0",
+      ...materializedDocs.warnings.map((warning) => `Warning: ${warning}`),
       `Next step available: run_simulation`,
     ].join("\n"),
   };
@@ -455,6 +466,7 @@ async function runSimulationTool(
       runId,
       hypothesis: designed.hypothesis,
       actorCount: designed.actorCount,
+      focusActors: readSpecFocusActors(specPath),
       mock: runtime.mock,
       signal: stopController.signal,
       shouldStop: () => stopRequestAppliesToRun(readStopRequest(runtime.workspace), runId),
@@ -499,19 +511,24 @@ async function runSimulationTool(
     }
 
     if (result.status === "failed") {
+      const failureMessage = result.failureMessage ?? "Simulation failed before completion.";
       runtime.updateTaskState(
         setFailedRunState(runtime.workspace, {
           title: designed.title,
           runId: result.runId,
           dbPath,
-          message: "Simulation failed before completion.",
+          message: failureMessage,
           failedAt: new Date().toISOString(),
         })
       );
       return {
         status: "error",
         summary: `Simulation "${designed.title}" failed.`,
-        details: `Run ID: ${result.runId}\nDatabase: ${dbPath}`,
+        details: [
+          `Run ID: ${result.runId}`,
+          `Database: ${dbPath}`,
+          `Failure: ${failureMessage}`,
+        ].join("\n"),
       };
     }
 
@@ -929,25 +946,48 @@ function stringifyArg(value: unknown): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
-function materializeBriefSourceDocs(
+async function materializeSourceDocs(
   workspace: AssistantWorkspaceLayout,
   input: {
     title: string;
-    brief: string;
     objective: string | null;
     hypothesis: string | null;
+    sourceUrls: string[];
     artifactDir: string;
   }
-): string {
+): Promise<{
+  docsPath: string;
+  referencedUrlCount: number;
+  downloadedCount: number;
+  warnings: string[];
+}> {
   const docsDir = ensureWorkspaceOutputDir(
     workspace,
     "simulations",
     basename(input.artifactDir),
     "docs"
   );
-  const filePath = join(docsDir, "operator-brief.md");
-  const urls = [...input.brief.matchAll(/https?:\/\/\S+/g)].map((match) => match[0]);
-  const sections = [
+  const warnings: string[] = [];
+  const sourceUrls = [...new Set(input.sourceUrls.map((url) => url.trim()).filter(Boolean))];
+  const manifest: Array<{ url: string; file?: string; status: "downloaded" | "failed"; error?: string }> = [];
+  let downloadedCount = 0;
+
+  for (const [index, url] of sourceUrls.entries()) {
+    try {
+      const fetched = await fetchSourceDocument(url);
+      const baseName = slugify(fetched.title || `source-${index + 1}`) || `source-${index + 1}`;
+      const filename = `${String(index + 1).padStart(2, "0")}-${baseName}.md`;
+      writeFileSync(join(docsDir, filename), `${fetched.content.trim()}\n`, "utf-8");
+      manifest.push({ url, file: filename, status: "downloaded" });
+      downloadedCount++;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      warnings.push(`Failed to download ${url}: ${message}`);
+      manifest.push({ url, status: "failed", error: message });
+    }
+  }
+
+  const manifestSections = [
     `# ${input.title}`,
     "",
     "## Objective",
@@ -956,14 +996,21 @@ function materializeBriefSourceDocs(
     "## Hypothesis",
     input.hypothesis ?? "Not specified.",
     "",
-    "## Operator Brief",
-    input.brief.trim(),
+    "## Source Materialization",
+    `Referenced URLs: ${sourceUrls.length}`,
+    `Downloaded documents: ${downloadedCount}`,
+    "",
+    "## Source Manifest",
+    JSON.stringify(manifest, null, 2),
   ];
-  if (urls.length > 0) {
-    sections.push("", "## Referenced URLs", ...urls.map((url) => `- ${url}`));
-  }
-  writeFileSync(filePath, `${sections.join("\n")}\n`, "utf-8");
-  return docsDir;
+  writeFileSync(join(input.artifactDir, "source-manifest.md"), `${manifestSections.join("\n")}\n`, "utf-8");
+
+  return {
+    docsPath: docsDir,
+    referencedUrlCount: sourceUrls.length,
+    downloadedCount,
+    warnings,
+  };
 }
 
 function persistDesignedDocsPath(specPath: string, docsPath: string): void {
@@ -988,6 +1035,99 @@ function readSpecActorCount(specPath: string): number | null {
   } catch {
     return null;
   }
+}
+
+function readSpecFocusActors(specPath: string): string[] {
+  if (!existsSync(specPath)) return [];
+  try {
+    const spec = JSON.parse(readFileSync(specPath, "utf-8")) as { focusActors?: unknown };
+    if (!Array.isArray(spec.focusActors)) return [];
+    return [...new Set(spec.focusActors.filter((item): item is string => typeof item === "string").map((item) => item.trim()).filter(Boolean))];
+  } catch {
+    return [];
+  }
+}
+
+async function fetchSourceDocument(url: string): Promise<{ title: string; content: string }> {
+  const response = await fetch(url, {
+    headers: {
+      "user-agent": "PublicMachina/0.1 (+https://github.com/angelgalvisc/publicmachina)",
+      accept: "text/html, text/markdown, text/plain;q=0.9, */*;q=0.5",
+    },
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+
+  const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
+  const body = await response.text();
+  const title = extractDocumentTitle(body, url);
+  const content = contentType.includes("text/html")
+    ? renderHtmlAsMarkdown(url, title, body)
+    : renderTextAsMarkdown(url, title, body);
+
+  if (content.trim().length < 120) {
+    throw new Error("Downloaded source content was too short to use as a document.");
+  }
+
+  return { title, content };
+}
+
+function extractDocumentTitle(body: string, fallbackUrl: string): string {
+  const titleMatch = body.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+  if (titleMatch?.[1]) {
+    return decodeHtmlEntities(titleMatch[1]).replace(/\s+/g, " ").trim();
+  }
+  return fallbackUrl;
+}
+
+function renderTextAsMarkdown(url: string, title: string, text: string): string {
+  return [
+    `# ${title}`,
+    "",
+    `Source URL: ${url}`,
+    "",
+    text.trim(),
+  ].join("\n");
+}
+
+function renderHtmlAsMarkdown(url: string, title: string, html: string): string {
+  const withoutScripts = html
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<noscript[\s\S]*?<\/noscript>/gi, " ");
+  const blockNormalized = withoutScripts
+    .replace(/<\/(p|div|section|article|header|footer|main|aside|li|ul|ol|h[1-6]|br)>/gi, "\n")
+    .replace(/<(p|div|section|article|header|footer|main|aside|li|ul|ol|h[1-6]|br)[^>]*>/gi, "\n");
+  const text = decodeHtmlEntities(blockNormalized.replace(/<[^>]+>/g, " "))
+    .replace(/\r/g, "")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+  return renderTextAsMarkdown(url, title, text);
+}
+
+function decodeHtmlEntities(text: string): string {
+  return text
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">");
+}
+
+function slugify(input: string): string {
+  return input
+    .normalize("NFKD")
+    .replace(/[^\w\s-]/g, "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 60);
 }
 
 function normalizeProviderRole(value: string | null): ProviderRole | null {

@@ -149,7 +149,7 @@ function createPromptSession(): PromptSession {
     input: process.stdin,
     output: process.stdout,
   });
-  const multilineSettleMs = 75;
+  const multilineSettleMs = 250;
 
   return {
     ask: (question, defaultValue, options) =>
@@ -187,8 +187,9 @@ function createPromptSession(): PromptSession {
             return;
           }
           if (settleTimer) clearTimeout(settleTimer);
-          // Briefs are commonly pasted as a burst of lines; wait briefly so the
-          // operator captures the whole paste instead of only the first line.
+          // Briefs are commonly pasted as a burst of lines; wait a bit longer
+          // so large terminal pastes are less likely to split into separate
+          // operator turns.
           settleTimer = setTimeout(finish, multilineSettleMs);
         };
         rl.on("line", onLine);

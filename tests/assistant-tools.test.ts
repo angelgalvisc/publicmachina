@@ -1,7 +1,7 @@
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { defaultConfig, saveConfig, type SimConfig } from "../src/config.js";
 import { SQLiteGraphStore } from "../src/db.js";
 import {
@@ -242,30 +242,63 @@ describe("assistant-tools hardening", () => {
 
   it("materializes source docs from the operator brief when no docs path is provided", async () => {
     const fixture = createRuntimeFixture();
-
-    const result = await executeAssistantTool(
-      "design_simulation",
-      {
-        brief: [
-          "Diseña una simulación nueva para evaluar el efecto de NemoClaw en Bitcoin.",
-          "Fuente principal: https://es.wired.com/articulos/nvidia-lanzara-una-plataforma-de-agentes-de-ia-de-codigo-abierto",
-          "Objetivo: medir si el efecto es material o solo ruido narrativo.",
-        ].join("\n"),
-      },
-      fixture.runtime
+    const fetchMock = vi.fn(async () =>
+      new Response(
+        "<html><head><title>NemoClaw Article</title></head><body><article>NVIDIA NemoClaw may affect Bitcoin sentiment through AI spillover.</article></body></html>",
+        {
+          status: 200,
+          headers: { "content-type": "text/html" },
+        }
+      )
     );
+    vi.stubGlobal("fetch", fetchMock);
 
-    expect(result.status).toBe("completed");
-    expect(result.details).toContain("Source docs:");
-    expect(result.details).toContain("Documents:");
-    expect(result.details).not.toContain("documents path is missing");
+    try {
+      const result = await executeAssistantTool(
+        "design_simulation",
+        {
+          brief: [
+            "Design a new simulation from scratch.",
+            "",
+            "Title:",
+            "Narrative impact of NemoClaw on Bitcoin",
+            "",
+            "Objective:",
+            "Measure whether the effect is material or mostly narrative noise.",
+            "",
+            "Primary source:",
+            "https://es.wired.com/articulos/nvidia-lanzara-una-plataforma-de-agentes-de-ia-de-codigo-abierto",
+            "",
+            "Configuration:",
+            "- 10 actors",
+            "- 16 rounds",
+            "- web search enabled",
+          ].join("\n"),
+        },
+        fixture.runtime
+      );
 
-    const taskState = fixture.getTaskState();
-    expect(taskState.activeDesign?.docsPath).toBeTruthy();
-    expect(taskState.activeDesign?.docsPath).toContain("/docs");
+      expect(result.status).toBe("completed");
+      expect(result.details).toContain("Source docs:");
+      expect(result.details).toContain("Downloaded source documents: 1/1");
+      expect(result.details).not.toContain("documents path is missing");
 
-    const runResult = await executeAssistantTool("run_simulation", {}, fixture.runtime);
-    expect(runResult.status).toBe("needs_confirmation");
+      const taskState = fixture.getTaskState();
+      expect(taskState.activeDesign?.docsPath).toBeTruthy();
+      expect(taskState.activeDesign?.docsPath).toContain("/docs");
+
+      const docsFiles = readdirSync(taskState.activeDesign!.docsPath!);
+      expect(docsFiles).not.toContain("operator-brief.md");
+      expect(docsFiles.some((file) => file.endsWith(".md"))).toBe(true);
+      const materializedDoc = readFileSync(join(taskState.activeDesign!.docsPath!, docsFiles[0]), "utf-8");
+      expect(materializedDoc).toContain("Source URL:");
+      expect(materializedDoc).toContain("NemoClaw Article");
+
+      const runResult = await executeAssistantTool("run_simulation", {}, fixture.runtime);
+      expect(runResult.status).toBe("needs_confirmation");
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("exposes only the tools that are valid for the current task state", () => {

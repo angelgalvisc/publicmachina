@@ -393,6 +393,7 @@ describe("runSimulation — scheduler v2", () => {
     });
 
     expect(result.status).toBe("failed");
+    expect(result.failureMessage).toContain("backend failure for actor-1");
 
     const postCount = (store as any).db
       .prepare("SELECT COUNT(*) as c FROM posts WHERE run_id = ?")
