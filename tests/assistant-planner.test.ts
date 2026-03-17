@@ -30,6 +30,47 @@ describe("assistant-planner.ts", () => {
     if (decision.kind === "tool_call") {
       expect(decision.tool).toBe("design_simulation");
       expect(decision.arguments.docsPath).toBe("./docs/elections");
+      expect(decision.arguments.brief).toBe("Design and run an election rumor simulation.");
+    }
+  });
+
+  it("preserves the user's exact brief when the model tries to rewrite design input", async () => {
+    const llm = new MockLLMClient();
+    llm.setResponse(
+      "Latest user input:\nTitle:\nNemoClaw and Bitcoin",
+      JSON.stringify({
+        kind: "tool_call",
+        tool: "design_simulation",
+        arguments: {
+          brief: "Create a BTC and AI simulation with multiple actors.",
+          docsPath: "./hallucinated-docs",
+        },
+      })
+    );
+
+    const userInput = [
+      "Design a new simulation from scratch.",
+      "",
+      "Title:",
+      "Narrative impact of the NVIDIA NemoClaw WIRED report on Bitcoin",
+      "",
+      "Primary source:",
+      "https://es.wired.com/articulos/nvidia-lanzara-una-plataforma-de-agentes-de-ia-de-codigo-abierto",
+    ].join("\n");
+
+    const decision = await planAssistantStep(llm, {
+      contextSummary: "Operator identity: PublicMachina.",
+      currentTaskSummary: "- Status: idle",
+      conversation: [],
+      userInput,
+      tools: ASSISTANT_TOOLS,
+    });
+
+    expect(decision.kind).toBe("tool_call");
+    if (decision.kind === "tool_call") {
+      expect(decision.tool).toBe("design_simulation");
+      expect(decision.arguments.brief).toBe(userInput);
+      expect(decision.arguments.docsPath).toBeUndefined();
     }
   });
 
@@ -186,6 +227,61 @@ describe("assistant-planner.ts", () => {
     if (decision.kind === "tool_call") {
       expect(decision.tool).toBe("design_simulation");
       expect(decision.arguments.docsPath).toBe("./inputs/nemoclaw-btc");
+      expect(decision.meta.model).toBe("heuristic");
+    }
+  });
+
+  it("treats labeled briefs as design requests even without an explicit design verb", async () => {
+    const llm = new MockLLMClient();
+
+    const decision = await planAssistantStep(llm, {
+      contextSummary: "Operator identity: PublicMachina.",
+      currentTaskSummary: "- Status: idle",
+      conversation: [],
+      userInput: [
+        "Title:",
+        "MiCA narrative impact on crypto markets",
+        "",
+        "Objective:",
+        "Assess how MiCA framing changes public market narratives.",
+        "",
+        "Primary source:",
+        "https://example.com/mica",
+      ].join("\n"),
+      tools: ASSISTANT_TOOLS,
+    });
+
+    expect(decision.kind).toBe("tool_call");
+    if (decision.kind === "tool_call") {
+      expect(decision.tool).toBe("design_simulation");
+      expect(decision.meta.model).toBe("heuristic");
+    }
+  });
+
+  it("treats refine-style structured requests as design updates without relying on the model", async () => {
+    const llm = new MockLLMClient();
+
+    const decision = await planAssistantStep(llm, {
+      contextSummary: "Operator identity: PublicMachina.",
+      currentTaskSummary: "- Status: designed\n- Active design: BTC and AI",
+      conversation: [],
+      userInput: [
+        "Refine this simulation.",
+        "",
+        "Configuration:",
+        "- 10 actors",
+        "- 16 rounds",
+        "- web search enabled",
+        "",
+        "Primary source:",
+        "https://example.com/nemoclaw",
+      ].join("\n"),
+      tools: ASSISTANT_TOOLS,
+    });
+
+    expect(decision.kind).toBe("tool_call");
+    if (decision.kind === "tool_call") {
+      expect(decision.tool).toBe("design_simulation");
       expect(decision.meta.model).toBe("heuristic");
     }
   });

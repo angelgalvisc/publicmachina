@@ -174,10 +174,11 @@ function finalizePlannerDecision(
     input.tools.some((tool) => tool.name === data.tool) &&
     isObject(data.arguments)
   ) {
+    const args = normalizePlannerToolArguments(data.tool as AssistantToolName, data.arguments, input);
     return {
       kind: "tool_call",
       tool: data.tool as AssistantToolName,
-      arguments: data.arguments,
+      arguments: args,
       meta,
     };
   }
@@ -187,6 +188,31 @@ function finalizePlannerDecision(
     message: "I need a bit more specificity before I act. Tell me whether you want me to design, run, inspect, report on, or compare a simulation.",
     meta,
   };
+}
+
+function normalizePlannerToolArguments(
+  tool: AssistantToolName,
+  args: Record<string, unknown>,
+  input: AssistantPlannerInput
+): Record<string, unknown> {
+  if (tool !== "design_simulation") return args;
+
+  const brief = input.userInput.trim();
+  const docsPath =
+    extractDocsPath(brief) ??
+    (typeof args.docsPath === "string" && args.docsPath.trim() ? args.docsPath.trim() : null);
+
+  const normalizedArgs: Record<string, unknown> = {
+    ...args,
+    brief,
+  };
+  if (docsPath) {
+    normalizedArgs.docsPath = docsPath;
+  } else {
+    delete normalizedArgs.docsPath;
+  }
+
+  return normalizedArgs;
 }
 
 function toPlannerMeta(response: LLMResponse): AssistantPlannerMeta {
@@ -229,19 +255,21 @@ function detectHeuristicPlannerDecision(
 
   const lower = normalized.toLowerCase();
   const looksLikeDesignRequest =
-    /\b(diseña|diseñala|diseñalo|rediseña|rediseñala|design|redesign|create a simulation)\b/i.test(
+    /\b(diseña|diseñala|diseñalo|rediseña|rediseñala|refina|ajusta|actualiza|modifica|design|redesign|refine|adjust|tighten|update|create a simulation)\b/i.test(
       normalized
     ) ||
     (/\breemplaza\b/i.test(normalized) && /\bsimulaci[oó]n\b/i.test(normalized));
 
-  const hasStructuredBrief =
+  const hasLabeledBrief =
     /(^|\n)\s*(t[ií]tulo|title|objetivo|objective|evento inicial|initial event|regla cr[ií]tica|critical rule|actores clave|key actors|configuraci[oó]n|configuration|fecha focal|focal date|tipo de simulaci[oó]n|simulation type|quiero observar|observation targets|fuente principal|primary source)\s*:/i.test(
       normalized
-    ) ||
+    );
+  const hasStructuredBrief =
+    hasLabeledBrief ||
     (normalized.includes("http://") || normalized.includes("https://")) ||
     normalized.length >= 500;
 
-  if (looksLikeDesignRequest && hasStructuredBrief) {
+  if ((looksLikeDesignRequest && hasStructuredBrief) || hasLabeledBrief) {
     return {
       kind: "tool_call",
       tool: "design_simulation",

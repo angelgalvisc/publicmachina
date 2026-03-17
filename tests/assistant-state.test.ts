@@ -158,4 +158,23 @@ describe("assistant-state.ts", () => {
     expect(state.sessionUsage.costUsd).toBe(0);
     expect(state.sessionUsage.toolCalls).toBe(0);
   });
+
+  it("preserves an active run across /clear semantics", () => {
+    const layout = makeWorkspace();
+
+    setActiveRunState(layout, {
+      title: "BTC and AI",
+      runId: "run-live",
+      dbPath: "/tmp/live.db",
+      historyRecordId: "hist-live",
+      totalRounds: 16,
+      roundsCompleted: 5,
+      startedAt: "2026-03-17T00:00:00.000Z",
+    });
+
+    const state = resetConversationState(layout);
+    expect(state.status).toBe("running");
+    expect(state.activeRun?.runId).toBe("run-live");
+    expect(state.pendingRun).toBeNull();
+  });
 });

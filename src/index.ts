@@ -89,7 +89,7 @@ export interface CliIO {
 }
 
 export interface PromptSession {
-  ask: (question: string, defaultValue?: string) => Promise<string>;
+  ask: (question: string, defaultValue?: string, options?: { multiline?: boolean }) => Promise<string>;
   askSecret?: (question: string) => Promise<string>;
   close: () => void;
 }
@@ -140,25 +140,51 @@ function createPromptSession(): PromptSession {
     input: process.stdin,
     output: process.stdout,
   });
+  const multilineSettleMs = 75;
 
   return {
-    ask: (question, defaultValue) =>
+    ask: (question, defaultValue, options) =>
       new Promise<string>((resolve, reject) => {
         let settled = false;
+        let settleTimer: NodeJS.Timeout | undefined;
+        const lines: string[] = [];
         const suffix = defaultValue ? ` [${defaultValue}]` : "";
+        const promptLabel = pc.cyan(`${question}${suffix}: `);
+        const cleanup = () => {
+          if (settleTimer) {
+            clearTimeout(settleTimer);
+            settleTimer = undefined;
+          }
+          rl.off("line", onLine);
+          rl.off("close", onClose);
+        };
+        const finish = () => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          const answer = lines.join("\n").trim();
+          resolve(answer || defaultValue || "");
+        };
         const onClose = () => {
           if (settled) return;
           settled = true;
+          cleanup();
           reject(new Error("Prompt closed"));
         };
+        const onLine = (line: string) => {
+          lines.push(line);
+          if (!options?.multiline) {
+            finish();
+            return;
+          }
+          if (settleTimer) clearTimeout(settleTimer);
+          // Briefs are commonly pasted as a burst of lines; wait briefly so the
+          // operator captures the whole paste instead of only the first line.
+          settleTimer = setTimeout(finish, multilineSettleMs);
+        };
+        rl.on("line", onLine);
         rl.once("close", onClose);
-        rl.question(pc.cyan(`${question}${suffix}: `), (answer) => {
-          if (settled) return;
-          settled = true;
-          rl.off("close", onClose);
-          const trimmed = answer.trim();
-          resolve(trimmed || defaultValue || "");
-        });
+        process.stdout.write(promptLabel);
       }),
     askSecret: (question) =>
       new Promise<string>((resolve, reject) => {

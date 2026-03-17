@@ -145,11 +145,12 @@ export function saveAssistantTaskState(
 
 export function resetConversationState(layout: AssistantWorkspaceLayout): AssistantTaskState {
   const current = loadAssistantTaskState(layout);
+  const preserveActiveRun = current.activeRun && ["running", "cancelling"].includes(current.status);
   const next: AssistantTaskState = {
     ...current,
-    status: current.activeDesign ? "designed" : "idle",
+    status: preserveActiveRun ? current.status : current.activeDesign ? "designed" : "idle",
     pendingRun: null,
-    activeRun: null,
+    activeRun: preserveActiveRun ? current.activeRun : null,
     sessionUsage: {
       costUsd: 0,
       toolCalls: 0,

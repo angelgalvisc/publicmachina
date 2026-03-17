@@ -15,6 +15,7 @@ import {
 import { buildAssistantContext } from "./assistant-context.js";
 import {
   appendAssistantMessage,
+  appendAssistantTrace,
   createAssistantSession,
   resetAssistantSession,
   type AssistantSession,
@@ -43,7 +44,7 @@ export interface AssistantOperatorIO {
 }
 
 export interface AssistantPromptSession {
-  ask: (question: string, defaultValue?: string) => Promise<string>;
+  ask: (question: string, defaultValue?: string, options?: { multiline?: boolean }) => Promise<string>;
 }
 
 export interface StartAssistantOperatorOptions {
@@ -77,6 +78,13 @@ export async function startAssistantOperator(
   };
 
   const updateTaskState = (nextState: AssistantTaskState): void => {
+    recordAssistantTrace(session, "task_state", {
+      fromStatus: taskState.status,
+      toStatus: nextState.status,
+      activeDesignTitle: nextState.activeDesign?.title ?? null,
+      activeRunId: nextState.activeRun?.runId ?? null,
+      pendingRunId: nextState.pendingRun?.runId ?? null,
+    });
     taskState = nextState;
   };
 
@@ -187,14 +195,15 @@ export async function startAssistantOperator(
 
   let nextInput = await prompt.ask(
     `What would you like to work on today, ${preferredName}? You can ask me to design, run, inspect, report on, or compare simulations.`,
-    ""
+    "",
+    { multiline: true }
   );
 
   while (true) {
     const input = nextInput.trim();
     nextInput = "";
     if (!input) {
-      nextInput = await prompt.ask(`${preferredName}`, "");
+      nextInput = await prompt.ask(`${preferredName}`, "", { multiline: true });
       continue;
     }
 
@@ -211,11 +220,21 @@ export async function startAssistantOperator(
       if (/^(\/exit|quit|exit)$/i.test(input)) {
         return;
       }
-      nextInput = await prompt.ask(`${preferredName}`, "");
+      nextInput = await prompt.ask(`${preferredName}`, "", { multiline: true });
       continue;
     }
 
     recordAssistantMessage(session, conversation, "user", input);
+    recordAssistantTrace(session, "input_received", {
+      length: input.length,
+      lineCount: input.split(/\r?\n/).length,
+      containsUrl: /https?:\/\//i.test(input),
+      structuredLabelsDetected:
+        /(^|\n)\s*(t[ií]tulo|title|objetivo|objective|evento inicial|initial event|actores clave|key actors|configuraci[oó]n|configuration|fecha focal|focal date|fuente principal|primary source)\s*:/i.test(
+          input
+        ),
+      taskStatus: taskState.status,
+    });
 
     if (taskState.status === "awaiting_confirmation" && taskState.pendingRun) {
       const normalized = input.toLowerCase();
@@ -232,7 +251,7 @@ export async function startAssistantOperator(
           runtime
         );
         emitToolResult(io, session, conversation, result);
-        nextInput = await prompt.ask(`${preferredName}`, "");
+        nextInput = await prompt.ask(`${preferredName}`, "", { multiline: true });
         continue;
       }
       if (/^(n|no|cancel)$/i.test(normalized)) {
@@ -240,7 +259,7 @@ export async function startAssistantOperator(
         const message = "Understood. I kept the design and cleared the pending run confirmation.";
         io.stdout(`${message}\n`);
         recordAssistantMessage(session, conversation, "assistant", message);
-        nextInput = await prompt.ask(`${preferredName}`, "");
+        nextInput = await prompt.ask(`${preferredName}`, "", { multiline: true });
         continue;
       }
     }
@@ -267,6 +286,14 @@ export async function startAssistantOperator(
         responded = true;
         break;
       }
+      recordAssistantTrace(session, "planner_decision", {
+        kind: decision.kind,
+        tool: decision.kind === "tool_call" ? decision.tool : null,
+        model: decision.meta.model,
+        costUsd: decision.meta.costUsd,
+        inputTokens: decision.meta.inputTokens,
+        outputTokens: decision.meta.outputTokens,
+      });
 
       if (decision.kind === "respond") {
         runtime.updateTaskState(addSessionUsage(workspace, {
@@ -282,7 +309,16 @@ export async function startAssistantOperator(
         costUsd: decision.meta.costUsd,
         toolCalls: 1,
       }));
+      recordAssistantTrace(session, "tool_call", {
+        tool: decision.tool,
+        args: summarizeToolArguments(decision.tool, decision.arguments),
+      });
       const result = await executeAssistantTool(decision.tool, decision.arguments, runtime);
+      recordAssistantTrace(session, "tool_result", {
+        tool: decision.tool,
+        status: result.status,
+        summary: result.summary,
+      });
       if (result.status === "needs_confirmation") {
         emitToolResult(io, session, conversation, result);
         responded = true;
@@ -295,10 +331,9 @@ export async function startAssistantOperator(
       }
 
       toolTrace.push(`TOOL ${decision.tool}: ${result.summary}${result.details ? `\n${result.details}` : ""}`);
-      if (step === 3) {
-        emitToolResult(io, session, conversation, result);
-        responded = true;
-      }
+      emitToolResult(io, session, conversation, result);
+      responded = true;
+      break;
     }
 
     if (!responded) {
@@ -307,7 +342,7 @@ export async function startAssistantOperator(
       recordAssistantMessage(session, conversation, "assistant", fallback);
     }
 
-    nextInput = await prompt.ask(`${preferredName}`, "");
+    nextInput = await prompt.ask(`${preferredName}`, "", { multiline: true });
   }
 }
 
@@ -353,6 +388,39 @@ function recordAssistantMessage(
   if (session) {
     appendAssistantMessage(session, role, content);
   }
+}
+
+function recordAssistantTrace(
+  session: AssistantSession | undefined,
+  name: string,
+  data: Record<string, unknown>
+): void {
+  if (session) {
+    appendAssistantTrace(session, name, data);
+  }
+}
+
+function summarizeToolArguments(
+  tool: string,
+  args: Record<string, unknown>
+): Record<string, unknown> {
+  if (tool === "design_simulation") {
+    const brief = typeof args.brief === "string" ? args.brief : "";
+    return {
+      docsPath: typeof args.docsPath === "string" ? args.docsPath : null,
+      briefLength: brief.length,
+      briefPreview: brief.length > 180 ? `${brief.slice(0, 180)}...` : brief,
+    };
+  }
+
+  return Object.fromEntries(
+    Object.entries(args).map(([key, value]) => {
+      if (typeof value === "string") {
+        return [key, value.length > 180 ? `${value.slice(0, 180)}...` : value];
+      }
+      return [key, value];
+    })
+  );
 }
 
 function emitToolResult(

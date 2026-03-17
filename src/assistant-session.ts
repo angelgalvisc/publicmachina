@@ -22,6 +22,12 @@ export interface AssistantSessionMessage {
   timestamp: string;
 }
 
+export interface AssistantSessionTrace {
+  name: string;
+  data: Record<string, unknown>;
+  timestamp: string;
+}
+
 type SessionEvent =
   | {
       type: "session_start";
@@ -31,7 +37,10 @@ type SessionEvent =
     }
   | ({
       type: "message";
-    } & AssistantSessionMessage);
+    } & AssistantSessionMessage)
+  | ({
+      type: "trace";
+    } & AssistantSessionTrace);
 
 export function createAssistantSession(
   layout: AssistantWorkspaceLayout,
@@ -68,6 +77,20 @@ export function appendAssistantMessage(
     type: "message",
     role,
     content: trimmed,
+    timestamp: new Date().toISOString(),
+  };
+  appendFileSync(session.path, `${JSON.stringify(event)}\n`, "utf-8");
+}
+
+export function appendAssistantTrace(
+  session: AssistantSession,
+  name: string,
+  data: Record<string, unknown>
+): void {
+  const event: SessionEvent = {
+    type: "trace",
+    name,
+    data,
     timestamp: new Date().toISOString(),
   };
   appendFileSync(session.path, `${JSON.stringify(event)}\n`, "utf-8");
