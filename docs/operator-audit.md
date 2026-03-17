@@ -1,5 +1,7 @@
 # Operator Audit — March 16, 2026
 
+> **Note**: This is a historical snapshot from March 16, 2026. The repository has since evolved (474 tests / 39 files as of March 17). For current architecture, see [architecture.md](architecture.md) and the README.
+
 This document records the operator hardening audit for PublicMachina's conversational assistant. The goal was not only to confirm that the code compiles and the tests pass, but to verify that the operator can guide a user from an ambiguous request to a runnable simulation with clear, trustworthy behavior.
 
 ## Audit Goals

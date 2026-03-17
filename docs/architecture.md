@@ -187,6 +187,60 @@ The operator also maintains:
 
 Those memories live in the assistant workspace and stay separate from actor memory stored in SQLite.
 
+## Design and grounding pipeline
+
+The full pipeline from brief to running simulation has three layers.
+
+### Design layer (LLM-guided, two passes)
+
+```text
+Brief
+  ↓
+Pass 1: interpretSimulationBrief()        → SimulationSpec
+  (title, objective, hypothesis, focusActors, sourceUrls, search, feed)
+  ↓
+materializeSourceDocs()                   → downloads sourceUrls to docs/
+  ↓
+Pass 2: designCast()                      → CastDesign
+  (castSeeds, communityProposals, entityTypeHints)
+  ↓
+Persist castDesign to simulation.spec.json
+```
+
+Pass 1 runs from the brief alone. Pass 2 runs **after** source documents are downloaded and uses their content to propose actors, communities, and entity type hints. This two-pass design ensures the cast is grounded in real source material, not just the brief.
+
+**Important**: the CLI `design` command only runs Pass 1. Pass 2 (cast design) runs automatically in the conversational operator path. When using the CLI `run` command, pass `--spec` to supply a spec with cast design from a prior operator session.
+
+### Grounding layer (LLM + deterministic)
+
+```text
+Source docs → ingestDirectory()           → chunks in DB
+  ↓
+extractOntology()                         → entity types, edge types, claims
+  (LLM: schema discovery + claims extraction, parallelized via pipelineConcurrency)
+  ↓
+buildKnowledgeGraph()                     → entities, edges, merges
+  (deterministic; uses entityTypeHints from cast design for type resolution)
+  ↓
+generateProfiles()                        → actors, communities, follows, seed posts
+  (LLM: profile generation + seed posts, parallelized via pipelineConcurrency)
+  (deterministic: community assignment from proposals, follow graph, tier assignment)
+```
+
+Actor priority order:
+1. `focusActors` from the spec (user-specified)
+2. `castSeeds` from cast design (LLM-proposed)
+3. Graph entities ranked by claim count (complementary)
+4. Hard cap by `actorCount`
+
+### Simulation runtime (deterministic, auditable)
+
+The engine, scheduler, feed, propagation, fatigue, events, memory, and moderation modules are deterministic given the same PRNG seed and cached web context. All state is persisted in SQLite.
+
+### Pipeline concurrency
+
+LLM calls in the grounding layer (claims extraction, profile generation, seed posts) run with bounded concurrency controlled by `simulation.pipelineConcurrency` (default: 3). This is separate from `simulation.concurrency` which controls the runtime scheduler. Traces are written to the telemetry table with `action_type = 'pipeline_trace'`.
+
 ## Data model
 
 The simulation database centers on:

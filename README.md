@@ -125,7 +125,7 @@ One file. Open it with `sqlite3`.
 ## Capabilities
 
 - **Internet-grounded agents**: Tier A and B actors can search SearXNG before deciding, with exact temporal cutoff filtering applied by PublicMachina.
-- **Natural-language design**: describe a scenario in plain English and get a validated `simulation.spec.json` plus executable config, with LLM-proposed actor cast and community structure.
+- **Natural-language design**: describe a scenario in plain English and get a validated `simulation.spec.json` plus executable config. The conversational operator adds a second pass that proposes actors and communities from downloaded source documents.
 - **Conversational operator**: the default entrypoint is a conversation, not a wall of flags.
 - **Replayable alternate realities**: rerun the same scenario under different seeds, response strategies, or information cutoffs.
 - **Deterministic replay**: seedable PRNG plus cached web context keeps reruns inspectable.
@@ -168,7 +168,7 @@ Brief ──→ Spec Design ──→ Source Downloads ──→ Cast Design
                                                   Report    Interview    Export
 ```
 
-The design layer uses LLM to propose actors and communities from the brief and source documents. The grounding layer (ingest, graph, profiles) executes deterministically, using cast seeds and type hints as input. The simulation runtime is fully auditable in SQLite. More detail lives in [docs/architecture.md](docs/architecture.md).
+The design layer uses LLM to propose actors and communities from the brief and source documents. The grounding layer (ingest, graph, profiles) uses LLM for ontology extraction and profile generation, but graph construction, entity resolution, community assignment, and the simulation runtime are deterministic and auditable. Everything is persisted in SQLite. More detail lives in [docs/architecture.md](docs/architecture.md).
 
 ## CLI reference
 

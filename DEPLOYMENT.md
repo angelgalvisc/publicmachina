@@ -180,6 +180,18 @@ search:
 
 PublicMachina applies the exact `cutoffDate` itself after retrieval so the same run can be replayed under the same information boundary.
 
+### Pipeline concurrency
+
+LLM calls during ontology extraction, profile generation, and seed post creation run with bounded concurrency:
+
+```yaml
+simulation:
+  pipelineConcurrency: 3   # default; controls LLM parallelism in the grounding layer
+  concurrency: 1            # controls runtime scheduler parallelism (separate)
+```
+
+Increase `pipelineConcurrency` if your provider supports higher throughput. Decrease to 1 if you hit rate limits during the pipeline phases.
+
 ## Container Example
 
 This example reflects the active product surface:
