@@ -494,5 +494,68 @@ function tierPriority(tier: "A" | "B" | "C"): number {
 }
 
 function normalizeToken(value: string): string {
-  return value.trim().toLowerCase();
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[._-]+/g, " ")
+    .replace(/\s+/g, " ");
+
+  if (!normalized) return "";
+
+  const aliases: Array<[string[], string]> = [
+    [
+      [
+        "markets journalist",
+        "market journalist",
+        "financial journalist",
+        "business journalist",
+        "market reporter",
+        "markets reporter",
+        "periodista de mercados",
+        "periodistas de mercados",
+      ],
+      "markets journalist",
+    ],
+    [
+      [
+        "technology journalist",
+        "tech journalist",
+        "technology reporter",
+        "tech reporter",
+        "periodista de tecnologia",
+        "periodistas de tecnologia",
+        "periodista de tecnología",
+        "periodistas de tecnología",
+      ],
+      "technology journalist",
+    ],
+    [
+      [
+        "macro trader",
+        "macro traders",
+        "macro investor",
+        "macro investors",
+        "trader macro",
+        "traders macro",
+      ],
+      "macro trader",
+    ],
+    [
+      [
+        "crypto trader",
+        "crypto traders",
+        "trader cripto",
+        "traders cripto",
+        "spot crypto trader",
+        "perp crypto trader",
+      ],
+      "crypto trader",
+    ],
+  ];
+
+  for (const [variants, canonical] of aliases) {
+    if (variants.includes(normalized)) return canonical;
+  }
+
+  return normalized;
 }

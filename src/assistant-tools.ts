@@ -61,6 +61,7 @@ import {
   type SupportedProvider,
 } from "./model-catalog.js";
 import { saveConfig } from "./config.js";
+import { formatSimulationPlan, validateSimulationSpec } from "./design.js";
 import {
   acquireActiveRunLock,
   clearStopRequest,
@@ -109,32 +110,36 @@ export interface AssistantToolResult {
 export const ASSISTANT_TOOLS: AssistantToolDefinition[] = [
   {
     name: "design_simulation",
-    description: "Design a simulation from a natural-language brief and persist the spec/config artifacts.",
+    description:
+      "Use this when the user wants to create, redesign, replace, or refine a simulation from a natural-language brief. This tool turns the brief into persisted spec/config artifacts and should be preferred over free-form discussion once the user has provided enough concrete scenario detail.",
     parameters: {
-      brief: "string — what to simulate",
-      docsPath: "string? — path to source documents if the brief references local files",
+      brief: "string — the scenario brief, constraints, URLs, and desired outputs",
+      docsPath: "string? — optional local documents path when the user explicitly references local files",
     },
   },
   {
     name: "run_simulation",
-    description: "Run a designed simulation after explicit user confirmation.",
+    description:
+      "Use this only after a simulation has already been designed and the user explicitly wants to execute it. This tool has side effects, requires confirmation before execution, and should not be called while another run is active in the same workspace.",
     parameters: {
-      specPath: "string? — path to a generated simulation spec",
-      configPath: "string? — path to a generated config",
-      docsPath: "string? — source documents path override",
-      confirmed: "boolean? — true only after the user confirms the run",
+      specPath: "string? — explicit generated simulation spec path when not using the active design",
+      configPath: "string? — explicit generated config path when not using the active design",
+      docsPath: "string? — source documents path override when the active design should not be used as-is",
+      confirmed: "boolean? — true only after the user has explicitly confirmed the run",
     },
   },
   {
     name: "stop_simulation",
-    description: "Request a graceful stop for the currently running simulation.",
+    description:
+      "Use this to request a graceful stop for the currently running simulation. It should only be used when a run is active or cancelling, and it preserves database consistency by stopping at safe checkpoints instead of killing the process abruptly.",
     parameters: {
       runId: "string? — explicit run ID if you need to stop a specific run",
     },
   },
   {
     name: "query_simulation",
-    description: "Query a simulation database using natural language or raw SQL.",
+    description:
+      "Use this after a run exists and the user wants analytical answers from the simulation database. The tool accepts either a natural-language question or a raw SELECT statement and should not be used before a runnable database target is available.",
     parameters: {
       question: "string — analytical question or raw SELECT statement",
       dbPath: "string? — explicit SQLite path",
@@ -143,7 +148,8 @@ export const ASSISTANT_TOOLS: AssistantToolDefinition[] = [
   },
   {
     name: "interview_actor",
-    description: "Interview a simulated actor from a completed run.",
+    description:
+      "Use this after a run completes when the user wants a simulated actor to explain their reasoning, motives, or memories. It requires a completed or cancelled run target plus an actor identifier and should not be used during early design.",
     parameters: {
       actorName: "string — actor name, handle, or ID",
       question: "string — what to ask the actor",
@@ -153,7 +159,8 @@ export const ASSISTANT_TOOLS: AssistantToolDefinition[] = [
   },
   {
     name: "generate_report",
-    description: "Generate an analytical report for a completed simulation run.",
+    description:
+      "Use this after a run completes when the user wants a written synthesis of outcomes, metrics, and narrative evolution. It should not be used before a completed or cancelled run target exists.",
     parameters: {
       dbPath: "string? — explicit SQLite path",
       runId: "string? — explicit run ID",
@@ -161,14 +168,16 @@ export const ASSISTANT_TOOLS: AssistantToolDefinition[] = [
   },
   {
     name: "list_history",
-    description: "List previous simulations remembered in the operator workspace.",
+    description:
+      "Use this when the user wants to see remembered simulations, find a prior run, or recover context from earlier work. It is safe, read-only, and available in every operator state.",
     parameters: {
       query: "string? — optional keyword filter",
     },
   },
   {
     name: "export_agent",
-    description: "Export a simulated actor as a CKP bundle.",
+    description:
+      "Use this after a run completes when the user wants to export an evolved actor as a CKP bundle. It requires a completed or cancelled run target plus an actor identifier and writes files inside the workspace only.",
     parameters: {
       actorName: "string — actor name, handle, or ID",
       outDir: "string? — export directory",
@@ -178,14 +187,41 @@ export const ASSISTANT_TOOLS: AssistantToolDefinition[] = [
   },
   {
     name: "switch_provider",
-    description: "Switch the configured provider or model for the operator and simulation pipeline.",
+    description:
+      "Use this when the user explicitly asks to inspect or change the current provider or model. It can change the global default or a role-specific override, including the dedicated assistant planner role.",
     parameters: {
       provider: "string? — anthropic, openai, or moonshot",
       model: "string? — provider model ID or friendly label",
-      role: "string? — analysis, generation, simulation, or report",
+      role: "string? — analysis, generation, simulation, report, or assistant",
     },
   },
 ];
+
+export function getAvailableAssistantTools(taskState: AssistantTaskState): AssistantToolDefinition[] {
+  const alwaysAvailable = new Set<AssistantToolName>([
+    "design_simulation",
+    "list_history",
+    "switch_provider",
+  ]);
+  const available = new Set<AssistantToolName>(alwaysAvailable);
+
+  if (taskState.activeDesign && ["designed", "awaiting_confirmation"].includes(taskState.status)) {
+    available.add("run_simulation");
+  }
+
+  if (taskState.activeRun && ["running", "cancelling"].includes(taskState.status)) {
+    available.add("stop_simulation");
+  }
+
+  if (taskState.lastCompletedRun || taskState.lastCancelledRun) {
+    available.add("query_simulation");
+    available.add("interview_actor");
+    available.add("generate_report");
+    available.add("export_agent");
+  }
+
+  return ASSISTANT_TOOLS.filter((tool) => available.has(tool.name));
+}
 
 export async function executeAssistantTool(
   tool: AssistantToolName,
@@ -267,6 +303,7 @@ async function designSimulationTool(
     objective: result.spec.objective,
     hypothesis: result.spec.hypothesis,
     docsPath,
+    actorCount: result.spec.actorCount,
     specPath: result.specPath,
     configPath: result.configPath,
     historyRecordId: result.historyRecord?.id ?? null,
@@ -275,11 +312,22 @@ async function designSimulationTool(
   };
   runtime.updateTaskState(setDesignedSimulationState(runtime.workspace, designState));
 
+  const preview = formatSimulationPlan(
+    {
+      ...result.spec,
+      docsPath,
+    },
+    validateSimulationSpec({
+      ...result.spec,
+      docsPath,
+    })
+  );
+
   return {
     status: "completed",
     summary: `Designed "${result.spec.title}" and saved artifacts.`,
     details: [
-      result.preview.trim(),
+      preview.trim(),
       `Spec: ${result.specPath}`,
       `Config: ${result.configPath}`,
       `Source docs: ${docsPath}`,
@@ -406,6 +454,7 @@ async function runSimulationTool(
       docsPath,
       runId,
       hypothesis: designed.hypothesis,
+      actorCount: designed.actorCount,
       mock: runtime.mock,
       signal: stopController.signal,
       shouldStop: () => stopRequestAppliesToRun(readStopRequest(runtime.workspace), runId),
@@ -842,6 +891,7 @@ function resolveDesignedSimulation(
     objective: null,
     hypothesis: null,
     docsPath: stringifyArg(args.docsPath),
+    actorCount: readSpecActorCount(specPath),
     specPath,
     configPath,
     historyRecordId: null,
@@ -927,10 +977,29 @@ function persistDesignedDocsPath(specPath: string, docsPath: string): void {
   }
 }
 
+function readSpecActorCount(specPath: string): number | null {
+  if (!existsSync(specPath)) return null;
+  try {
+    const spec = JSON.parse(readFileSync(specPath, "utf-8")) as { actorCount?: unknown };
+    if (typeof spec.actorCount !== "number" || !Number.isFinite(spec.actorCount)) {
+      return null;
+    }
+    return Math.max(0, Math.round(spec.actorCount));
+  } catch {
+    return null;
+  }
+}
+
 function normalizeProviderRole(value: string | null): ProviderRole | null {
   if (!value) return null;
   const normalized = value.trim().toLowerCase();
-  if (normalized === "analysis" || normalized === "generation" || normalized === "simulation" || normalized === "report") {
+  if (
+    normalized === "analysis" ||
+    normalized === "generation" ||
+    normalized === "simulation" ||
+    normalized === "report" ||
+    normalized === "assistant"
+  ) {
     return normalized;
   }
   return null;

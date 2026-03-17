@@ -15,7 +15,11 @@ import {
   setDesignedSimulationState,
   type AssistantTaskState,
 } from "../src/assistant-state.js";
-import { executeAssistantTool, type AssistantToolRuntime } from "../src/assistant-tools.js";
+import {
+  executeAssistantTool,
+  getAvailableAssistantTools,
+  type AssistantToolRuntime,
+} from "../src/assistant-tools.js";
 import { acquireActiveRunLock, releaseActiveRunLock } from "../src/run-control.js";
 
 const tempDirs: string[] = [];
@@ -147,6 +151,7 @@ describe("assistant-tools hardening", () => {
         objective: "Stress token spending",
         hypothesis: null,
         docsPath: fixture.docsPath,
+        actorCount: null,
         specPath,
         configPath: fixture.configPath,
         historyRecordId: null,
@@ -206,6 +211,7 @@ describe("assistant-tools hardening", () => {
         objective: "Ensure only one active run per workspace",
         hypothesis: null,
         docsPath: fixture.docsPath,
+        actorCount: null,
         specPath,
         configPath: fixture.configPath,
         historyRecordId: null,
@@ -251,6 +257,8 @@ describe("assistant-tools hardening", () => {
 
     expect(result.status).toBe("completed");
     expect(result.details).toContain("Source docs:");
+    expect(result.details).toContain("Documents:");
+    expect(result.details).not.toContain("documents path is missing");
 
     const taskState = fixture.getTaskState();
     expect(taskState.activeDesign?.docsPath).toBeTruthy();
@@ -258,5 +266,33 @@ describe("assistant-tools hardening", () => {
 
     const runResult = await executeAssistantTool("run_simulation", {}, fixture.runtime);
     expect(runResult.status).toBe("needs_confirmation");
+  });
+
+  it("exposes only the tools that are valid for the current task state", () => {
+    const fixture = createRuntimeFixture();
+
+    const idleTools = getAvailableAssistantTools(fixture.getTaskState()).map((tool) => tool.name);
+    expect(idleTools).toEqual(["design_simulation", "list_history", "switch_provider"]);
+
+    fixture.runtime.updateTaskState(
+      setDesignedSimulationState(fixture.workspace, {
+        title: "Tool state test",
+        brief: "Design a simulation.",
+        objective: "Verify tool exposure",
+        hypothesis: null,
+        docsPath: fixture.docsPath,
+        actorCount: 10,
+        specPath: join(fixture.rootDir, "simulation.spec.json"),
+        configPath: fixture.configPath,
+        historyRecordId: null,
+        workspaceDir: fixture.workspace.rootDir,
+        rounds: 16,
+      })
+    );
+
+    const designedTools = getAvailableAssistantTools(fixture.getTaskState()).map((tool) => tool.name);
+    expect(designedTools).toContain("run_simulation");
+    expect(designedTools).not.toContain("stop_simulation");
+    expect(designedTools).not.toContain("generate_report");
   });
 });

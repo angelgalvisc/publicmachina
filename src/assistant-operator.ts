@@ -7,6 +7,7 @@ import {
   addDurableMemory,
   appendDailyNote,
   bootstrapAssistantWorkspace,
+  loadUserProfile,
   resolveAssistantWorkspace,
   updateUserProfile,
   type AssistantWorkspaceLayout,
@@ -26,7 +27,11 @@ import {
   type AssistantTaskState,
 } from "./assistant-state.js";
 import { planAssistantStep } from "./assistant-planner.js";
-import { ASSISTANT_TOOLS, executeAssistantTool, type AssistantToolRuntime } from "./assistant-tools.js";
+import {
+  executeAssistantTool,
+  getAvailableAssistantTools,
+  type AssistantToolRuntime,
+} from "./assistant-tools.js";
 import { createFeatureLlm } from "./simulation-service.js";
 import { handleModelCommand } from "./model-command.js";
 
@@ -62,7 +67,8 @@ export async function startAssistantOperator(
     : undefined;
   let taskState = loadAssistantTaskState(workspace);
   let plannerLlm = createFeatureLlm(config, { mock: options.mock, feature: "assistant" });
-  let preferredName = "there";
+  const userProfile = loadUserProfile(workspace);
+  let preferredName = userProfile.preferredName ?? "there";
   const conversation: Array<{ role: "user" | "assistant"; content: string }> = [];
 
   const updateConfig = async (nextConfig: SimConfig): Promise<void> => {
@@ -135,18 +141,33 @@ export async function startAssistantOperator(
     return;
   }
 
-  const preferred = await prompt.ask("What should I call you?", "there");
-  preferredName = preferred.trim() || "there";
-  updateUserProfile(workspace, { preferredName });
-  recordAssistantMessage(session, conversation, "user", `Call me ${preferredName}.`);
-  const greet = `Good to meet you, ${preferredName}.`;
-  io.stdout(`${greet}\n`);
-  recordAssistantMessage(session, conversation, "assistant", greet);
+  if (userProfile.preferredName) {
+    const returning = `Welcome back, ${userProfile.preferredName}.`;
+    io.stdout(`${returning}\n`);
+    recordAssistantMessage(session, conversation, "assistant", returning);
+  } else {
+    const preferred = await prompt.ask("What should I call you?", "there");
+    preferredName = preferred.trim() || "there";
+    updateUserProfile(workspace, { preferredName });
+    recordAssistantMessage(session, conversation, "user", `Call me ${preferredName}.`);
+    const greet = `Good to meet you, ${preferredName}.`;
+    io.stdout(`${greet}\n`);
+    recordAssistantMessage(session, conversation, "assistant", greet);
+  }
 
-  const context = await prompt.ask(
-    "What context should I keep in mind? You can mention the domain, region, organization, or objective.",
-    ""
-  );
+  let context = "";
+  if (userProfile.lastContext) {
+    context = userProfile.lastContext;
+    const rememberedContext = `I will keep using your last context unless you tell me to change it: ${context}`;
+    (io.status ?? io.stdout)(`${rememberedContext}\n`);
+    recordAssistantMessage(session, conversation, "assistant", rememberedContext);
+  } else {
+    context = await prompt.ask(
+      "What context should I keep in mind? You can mention the domain, region, organization, or objective.",
+      ""
+    );
+  }
+
   if (context.trim()) {
     updateUserProfile(workspace, {
       lastContext: context.trim(),
@@ -236,7 +257,7 @@ export async function startAssistantOperator(
           currentTaskSummary: summarizeTaskState(taskState),
           conversation,
           userInput: input,
-          tools: ASSISTANT_TOOLS,
+          tools: getAvailableAssistantTools(taskState),
           toolTrace,
         });
       } catch (err) {

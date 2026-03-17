@@ -64,11 +64,14 @@ describe("designSimulationFromBrief", () => {
 
     expect(result.validation.errors).toHaveLength(0);
     expect(result.spec.docsPath).toBe("./docs/global-cloud-outage");
+    expect(result.spec.sourceUrls).toEqual([]);
+    expect(result.spec.actorCount).toBeNull();
     expect(result.spec.rounds).toBe(12);
     expect(result.spec.search.enabled).toBe(true);
     expect(result.spec.search.allowProfessions).toEqual(["analyst", "journalist"]);
     expect(result.spec.feed.embeddingEnabled).toBe(true);
     expect(result.preview).toContain("Simulation Plan");
+    expect(result.preview).toContain("Actor count: not constrained");
     expect(result.preview).toContain("Search policy: tiers A, B, up to 5 actors/round (A:3, B:2)");
   });
 
@@ -124,6 +127,10 @@ describe("designSimulationFromBrief", () => {
 
     expect(result.spec.title).toContain("NemoClaw");
     expect(result.spec.objective).toContain("Bitcoin");
+    expect(result.spec.sourceUrls).toEqual([
+      "https://es.wired.com/articulos/nvidia-lanzara-una-plataforma-de-agentes-de-ia-de-codigo-abierto",
+    ]);
+    expect(result.spec.actorCount).toBe(10);
     expect(result.spec.rounds).toBe(16);
     expect(result.spec.search.enabled).toBe(true);
     expect(result.spec.search.enabledTiers).toEqual(["A", "B"]);
@@ -144,6 +151,51 @@ describe("designSimulationFromBrief", () => {
     expect(parsed.search.enabled).toBe(true);
     expect(parsed.search.enabledTiers).toEqual(["A", "B"]);
   });
+
+  it("uses a structured English operator brief as authoritative input", async () => {
+    const llm = makeDesignLlm();
+    const result = await designSimulationFromBrief(
+      llm,
+      [
+        "Design a new simulation from scratch and replace any previous design.",
+        "",
+        "Title:",
+        "Narrative impact of NVIDIA NemoClaw coverage on Bitcoin",
+        "",
+        "Objective:",
+        "Assess whether the reported NemoClaw launch can materially change Bitcoin sentiment or remains narrative noise.",
+        "",
+        "Primary source:",
+        "https://example.com/nemoclaw",
+        "",
+        "Focal date:",
+        "2026-03-16",
+        "",
+        "Key actors:",
+        "- macro traders",
+        "- crypto traders",
+        "- markets journalists",
+        "",
+        "Configuration:",
+        "- 8 actors",
+        "- 12 rounds",
+        "- web search enabled",
+        "- allow search for technology journalists, markets journalists, macro traders, and crypto traders",
+        "- up to 4 actors per round with search",
+      ].join("\n")
+    );
+
+    expect(result.spec.title).toContain("NemoClaw");
+    expect(result.spec.sourceUrls).toEqual(["https://example.com/nemoclaw"]);
+    expect(result.spec.actorCount).toBe(8);
+    expect(result.spec.rounds).toBe(12);
+    expect(result.spec.search.allowProfessions).toEqual([
+      "crypto traders",
+      "macro traders",
+      "markets journalists",
+      "technology journalists",
+    ]);
+  });
 });
 
 describe("validateSimulationSpec", () => {
@@ -154,6 +206,8 @@ describe("validateSimulationSpec", () => {
       objective: "Observe how a supply chain narrative propagates.",
       hypothesis: null,
       docsPath: null,
+      sourceUrls: [],
+      actorCount: null,
       rounds: 8,
       focusActors: ["suppliers", "investors"],
       search: {
@@ -185,5 +239,6 @@ describe("validateSimulationSpec", () => {
 
     expect(validation.errors).toHaveLength(0);
     expect(validation.warnings.some((warning) => warning.field === "docsPath")).toBe(true);
+    expect(validation.warnings[0]?.message).toContain("materialize them from the brief");
   });
 });

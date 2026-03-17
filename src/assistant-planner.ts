@@ -134,7 +134,7 @@ async function requestPlannerJson(
   system: string,
   maxTokens: number
 ): Promise<{ data: PlannerJson | null; raw: string; meta: AssistantPlannerMeta }> {
-  const response = await llm.complete("simulation", prompt, {
+  const response = await llm.complete("assistant", prompt, {
     system,
     temperature: 0.0,
     maxTokens,
@@ -235,7 +235,7 @@ function detectHeuristicPlannerDecision(
     (/\breemplaza\b/i.test(normalized) && /\bsimulaci[oó]n\b/i.test(normalized));
 
   const hasStructuredBrief =
-    /(^|\n)\s*(t[ií]tulo|objetivo|evento inicial|regla cr[ií]tica|actores clave|configuraci[oó]n|fecha focal|tipo de simulaci[oó]n|quiero observar|fuente principal)\s*:/i.test(
+    /(^|\n)\s*(t[ií]tulo|title|objetivo|objective|evento inicial|initial event|regla cr[ií]tica|critical rule|actores clave|key actors|configuraci[oó]n|configuration|fecha focal|focal date|tipo de simulaci[oó]n|simulation type|quiero observar|observation targets|fuente principal|primary source)\s*:/i.test(
       normalized
     ) ||
     (normalized.includes("http://") || normalized.includes("https://")) ||
@@ -285,7 +285,7 @@ function detectHeuristicPlannerDecision(
 
 function extractDocsPath(input: string): string | null {
   const match = input.match(
-    /(?:^|\n)\s*(?:contexto documental|documents path|documentos fuente|docspath)\s*:\s*([^\n]+)/i
+    /(?:^|\n)\s*(?:contexto documental|document context|documents path|documentos fuente|docspath)\s*:\s*([^\n]+)/i
   );
   if (!match) return null;
   const candidate = match[1]?.trim();

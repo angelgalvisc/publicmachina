@@ -43,6 +43,7 @@ describe("assistant-state.ts", () => {
       objective: "Track rumor escalation",
       hypothesis: "Local media accelerates panic",
       docsPath: "./docs/rumor",
+      actorCount: 6,
       specPath: "/tmp/spec.json",
       configPath: "/tmp/config.yaml",
       historyRecordId: "hist-1",
@@ -53,6 +54,7 @@ describe("assistant-state.ts", () => {
     let state = loadAssistantTaskState(layout);
     expect(state.status).toBe("designed");
     expect(state.activeDesign?.title).toBe("Bogota rumor crisis");
+    expect(state.activeDesign?.actorCount).toBe(6);
 
     setPendingRunConfirmation(layout, {
       specPath: "/tmp/spec.json",
@@ -84,6 +86,7 @@ describe("assistant-state.ts", () => {
       objective: "Map rumor spread",
       hypothesis: null,
       docsPath: "./docs/elections",
+      actorCount: null,
       specPath: "/tmp/spec.json",
       configPath: "/tmp/config.yaml",
       historyRecordId: "hist-2",

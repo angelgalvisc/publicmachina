@@ -22,6 +22,7 @@ export interface DesignedSimulationState {
   objective: string | null;
   hypothesis: string | null;
   docsPath: string | null;
+  actorCount: number | null;
   specPath: string;
   configPath: string;
   historyRecordId: string | null;

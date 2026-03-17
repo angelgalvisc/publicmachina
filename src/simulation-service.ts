@@ -52,6 +52,7 @@ export interface ExecutePipelineInput {
   docsPath: string;
   runId?: string;
   hypothesis?: string | null;
+  actorCount?: number | null;
   mock?: boolean;
   callbacks?: PipelineCallbacks;
   signal?: AbortSignal;
@@ -97,6 +98,8 @@ export function createFeatureLlm(
           hypothesis:
             "Journalists and regulators accelerate negative sentiment faster than the company can stabilize the narrative.",
           docsPath: null,
+          sourceUrls: [],
+          actorCount: null,
           rounds: 10,
           focusActors: ["customers", "journalists", "regulators", "company spokespeople", "investors"],
           search: {
@@ -262,6 +265,7 @@ export async function executePipeline(
       {
         runId,
         hypothesis: input.hypothesis ?? undefined,
+        maxActors: input.actorCount ?? 0,
         platform: config.simulation.platform,
       },
       config

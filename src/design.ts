@@ -47,6 +47,8 @@ export interface SimulationSpec {
   objective: string;
   hypothesis: string | null;
   docsPath: string | null;
+  sourceUrls: string[];
+  actorCount: number | null;
   rounds: number;
   focusActors: string[];
   search: SimulationSearchSpec;
@@ -79,6 +81,8 @@ interface SimulationSpecDraft {
   objective?: unknown;
   hypothesis?: unknown;
   docsPath?: unknown;
+  sourceUrls?: unknown;
+  actorCount?: unknown;
   rounds?: unknown;
   focusActors?: unknown;
   search?: unknown;
@@ -96,22 +100,38 @@ const SUPPORTED_ARCHETYPES = new Set(["persona", "organization", "media", "insti
 const STRUCTURED_BRIEF_LABELS = new Set([
   "título",
   "titulo",
+  "title",
   "objetivo",
+  "objective",
   "fuente principal",
+  "primary source",
+  "source urls",
   "contexto documental",
+  "document context",
+  "documents path",
   "fecha focal",
+  "focal date",
   "tipo de simulación",
   "tipo de simulacion",
+  "simulation type",
   "evento inicial",
+  "initial event",
   "regla crítica",
   "regla critica",
+  "critical rule",
   "actores clave",
+  "key actors",
   "configuración",
   "configuracion",
+  "configuration",
   "quiero observar",
+  "observation targets",
   "quiero como salida",
+  "desired outputs",
   "alcance",
+  "scope",
   "horizonte temporal",
+  "time horizon",
 ]);
 
 export class DesignValidationError extends Error {
@@ -281,7 +301,9 @@ function normalizeSimulationSpec(
   }
 
   if (!docsPath) {
-    warnings.push("No documents path was specified. The generated YAML is ready, but run still needs --docs.");
+    warnings.push(
+      "No documents path was specified. A caller must provide source documents or materialize them from the brief before running."
+    );
   }
 
   const objective =
@@ -300,6 +322,9 @@ function normalizeSimulationSpec(
     assumptions.push(`Defaulted to ${rounds} rounds based on the current simulation config.`);
   }
 
+  const actorCount = capAtLeast(normalizeInteger(draft.actorCount), 0, 0) || null;
+  const sourceUrls = normalizeStringArray(draft.sourceUrls);
+
   const search = normalizeSearchSpec(draft.search, baseConfig, assumptions);
   const feed = normalizeFeedSpec(draft.feed, baseConfig);
 
@@ -308,6 +333,8 @@ function normalizeSimulationSpec(
     objective,
     hypothesis: normalizeString(draft.hypothesis),
     docsPath,
+    sourceUrls,
+    actorCount,
     rounds,
     focusActors: normalizeStringArray(draft.focusActors),
     search,
@@ -323,35 +350,57 @@ function parseStructuredSimulationBrief(
 ): SimulationSpecDraft | null {
   const sections = parseLabeledSections(brief);
   const signals = [
-    sections.get("título") ?? sections.get("titulo"),
-    sections.get("objetivo"),
-    sections.get("evento inicial"),
-    sections.get("actores clave"),
-    sections.get("configuración") ?? sections.get("configuracion"),
+    sections.get("título") ?? sections.get("titulo") ?? sections.get("title"),
+    sections.get("objetivo") ?? sections.get("objective"),
+    sections.get("evento inicial") ?? sections.get("initial event"),
+    sections.get("actores clave") ?? sections.get("key actors"),
+    sections.get("configuración") ?? sections.get("configuracion") ?? sections.get("configuration"),
   ].filter(Boolean);
 
   if (signals.length < 3) return null;
 
   const baseConfig = options.baseConfig ?? defaultConfig();
-  const title = cleanStructuredValue(firstLine(sections.get("título") ?? sections.get("titulo")));
-  const objective = cleanStructuredValue(sections.get("objetivo"));
-  const eventInitial = cleanStructuredValue(sections.get("evento inicial"));
-  const criticalRule = cleanStructuredValue(
-    sections.get("regla crítica") ?? sections.get("regla critica")
+  const title = cleanStructuredValue(
+    firstLine(sections.get("título") ?? sections.get("titulo") ?? sections.get("title"))
   );
-  const docsPath = cleanStructuredValue(sections.get("contexto documental"));
-  const dateFocal = normalizeStructuredDate(cleanStructuredValue(sections.get("fecha focal")));
-  const focusActors = parseBulletList(sections.get("actores clave"));
-  const observationTargets = parseBulletList(sections.get("quiero observar"));
-  const requestedOutputs = parseBulletList(sections.get("quiero como salida"));
+  const objective = cleanStructuredValue(sections.get("objetivo") ?? sections.get("objective"));
+  const eventInitial = cleanStructuredValue(
+    sections.get("evento inicial") ?? sections.get("initial event")
+  );
+  const criticalRule = cleanStructuredValue(
+    sections.get("regla crítica") ?? sections.get("regla critica") ?? sections.get("critical rule")
+  );
+  const docsPath = cleanStructuredValue(
+    sections.get("contexto documental") ??
+      sections.get("document context") ??
+      sections.get("documents path")
+  );
+  const dateFocal = normalizeStructuredDate(
+    cleanStructuredValue(sections.get("fecha focal") ?? sections.get("focal date"))
+  );
+  const focusActors = parseBulletList(sections.get("actores clave") ?? sections.get("key actors"));
+  const observationTargets = parseBulletList(
+    sections.get("quiero observar") ?? sections.get("observation targets")
+  );
+  const requestedOutputs = parseBulletList(
+    sections.get("quiero como salida") ?? sections.get("desired outputs")
+  );
   const configurationText = cleanStructuredValue(
-    sections.get("configuración") ?? sections.get("configuracion")
+    sections.get("configuración") ?? sections.get("configuracion") ?? sections.get("configuration")
+  );
+  const sourceUrls = extractUrls(
+    cleanStructuredValue(
+      sections.get("fuente principal") ?? sections.get("primary source") ?? sections.get("source urls")
+    ) ?? brief
   );
 
   const rounds =
     extractRoundsFromConfiguration(configurationText) ??
-    extractRoundsFromConfiguration(cleanStructuredValue(sections.get("horizonte temporal"))) ??
+    extractRoundsFromConfiguration(
+      cleanStructuredValue(sections.get("horizonte temporal") ?? sections.get("time horizon"))
+    ) ??
     undefined;
+  const actorCount = extractActorCountFromConfiguration(configurationText);
 
   const searchEnabled = /b[uú]squeda web habilitada|internet habilitada|web search enabled/i.test(
     configurationText ?? ""
@@ -415,6 +464,8 @@ function parseStructuredSimulationBrief(
     objective: objective ?? undefined,
     hypothesis: eventInitial ?? undefined,
     docsPath: docsPath ?? undefined,
+    sourceUrls,
+    actorCount,
     rounds,
     focusActors,
     search: searchDraft,
@@ -481,7 +532,8 @@ export function validateSimulationSpec(spec: SimulationSpec): DesignValidationRe
   if (!spec.docsPath) {
     warnings.push({
       field: "docsPath",
-      message: "documents path is missing; run still needs --docs or a separate documents source",
+      message:
+        "documents path is missing; a caller must provide source documents or materialize them from the brief before running",
       severity: "warning",
     });
   }
@@ -601,15 +653,25 @@ function parseBulletList(value: string | undefined | null): string[] {
 
 function extractRoundsFromConfiguration(value: string | null): number | undefined {
   if (!value) return undefined;
-  const match = value.match(/(\d+)\s*rondas?/i);
+  const match = value.match(/(\d+)\s*(?:rounds?|rondas?)/i);
   if (!match) return undefined;
   const rounds = Number.parseInt(match[1] ?? "", 10);
   return Number.isFinite(rounds) ? rounds : undefined;
 }
 
+function extractActorCountFromConfiguration(value: string | null): number | undefined {
+  if (!value) return undefined;
+  const match = value.match(/(\d+)\s*(?:actors?|agentes?)/i);
+  if (!match) return undefined;
+  const actorCount = Number.parseInt(match[1] ?? "", 10);
+  return Number.isFinite(actorCount) ? actorCount : undefined;
+}
+
 function extractSearchBudget(value: string | null): number | undefined {
   if (!value) return undefined;
-  const match = value.match(/m[aá]ximo\s+(\d+)\s+actores?\s+por\s+ronda\s+con\s+b[uú]squeda/i);
+  const match =
+    value.match(/m[aá]ximo\s+(\d+)\s+actores?\s+por\s+ronda\s+con\s+b[uú]squeda/i) ??
+    value.match(/up\s+to\s+(\d+)\s+actors?\s+per\s+round\s+with\s+search/i);
   if (!match) return undefined;
   const budget = Number.parseInt(match[1] ?? "", 10);
   return Number.isFinite(budget) ? budget : undefined;
@@ -619,11 +681,14 @@ function extractSearchRoles(value: string | null): string[] {
   if (!value) return [];
   const line = value
     .split(/\r?\n/)
-    .find((entry) => /permitir\s+b[uú]squeda\s+a/i.test(entry));
+    .find((entry) => /permitir\s+b[uú]squeda\s+a|allow\s+search\s+for/i.test(entry));
   if (!line) return [];
-  const stripped = line.replace(/^.*permitir\s+b[uú]squeda\s+a\s*/i, "").trim();
+  const stripped = line
+    .replace(/^.*permitir\s+b[uú]squeda\s+a\s*/i, "")
+    .replace(/^.*allow\s+search\s+for\s*/i, "")
+    .trim();
   return stripped
-    .split(/,|\sy\s/gi)
+    .split(/,|\sy\s|\sand\s/gi)
     .map((entry) => entry.trim().replace(/\.$/, ""))
     .filter(Boolean);
 }
@@ -641,6 +706,16 @@ function normalizeStructuredDate(value: string | null): string | null {
   return iso ? iso[0] : null;
 }
 
+function extractUrls(value: string): string[] {
+  return Array.from(
+    new Set(
+      [...value.matchAll(/https?:\/\/\S+/g)]
+        .map((match) => match[0].replace(/[),.;]+$/, ""))
+        .filter(Boolean)
+    )
+  );
+}
+
 function inferLanguageFromBrief(brief: string, fallback: string): string {
   return /[áéíóúñ]|b[uú]squeda|simulaci[oó]n|mercado/i.test(brief) ? "es" : fallback;
 }
@@ -653,8 +728,10 @@ export function formatSimulationPlan(
     "Simulation Plan",
     `- Title: ${spec.title}`,
     `- Objective: ${spec.objective}`,
+    `- Actor count: ${spec.actorCount ?? "not constrained"}`,
     `- Rounds: ${spec.rounds}`,
     `- Documents: ${spec.docsPath ?? "(provide via --docs when running)"}`,
+    `- Source URLs: ${formatList(spec.sourceUrls)}`,
     `- Focus actors: ${formatList(spec.focusActors)}`,
     `- Hypothesis: ${spec.hypothesis ?? "none"}`,
     `- Web search: ${spec.search.enabled ? "enabled" : "disabled"}`,
@@ -722,7 +799,7 @@ export async function interpretSimulationBrief(
     'Supported archetypes are: "persona", "organization", "media", "institution".',
     "If the user says only certain roles may search, map concrete jobs like journalist or analyst to allowProfessions, and institutional categories to allowArchetypes.",
     "If information is missing, leave it null when possible and describe the assumption in assumptions.",
-    "Return an object with keys: title, objective, hypothesis, docsPath, rounds, focusActors, search, feed, assumptions, warnings.",
+    "Return an object with keys: title, objective, hypothesis, docsPath, sourceUrls, actorCount, rounds, focusActors, search, feed, assumptions, warnings.",
     "search must be an object with keys: enabled, enabledTiers, maxActorsPerRound, maxActorsByTier, allowArchetypes, denyArchetypes, allowProfessions, denyProfessions, allowActors, denyActors, cutoffDate, categories, defaultLanguage, maxResultsPerQuery, maxQueriesPerActor, strictCutoff, timeoutMs.",
     "feed must be an object with keys: embeddingEnabled, embeddingWeight.",
     `Current engine defaults: ${JSON.stringify({
@@ -730,6 +807,7 @@ export async function interpretSimulationBrief(
       defaultSearchEnabled: baseConfig.search.enabled,
       defaultSearchTiers: baseConfig.search.enabledTiers,
       defaultSearchBudget: baseConfig.search.maxActorsPerRound,
+      defaultActorCount: null,
       defaultFeedEmbeddingEnabled: baseConfig.feed.embeddingEnabled,
     })}`,
   ].join("\n");

@@ -66,6 +66,17 @@ describe("provider-selection.ts", () => {
     expect(resolveProviderConfig(cleared, "report").provider).toBe("anthropic");
   });
 
+  it("supports a dedicated assistant planner role override", () => {
+    const withOverride = setRoleProviderSelection(fallback, "assistant", {
+      provider: "openai",
+      model: "gpt-5-mini",
+    });
+
+    expect(resolveProviderConfig(withOverride, "assistant").provider).toBe("openai");
+    expect(resolveProviderConfig(withOverride, "assistant").model).toBe("gpt-5-mini-2025-08-07");
+    expect(resolveProviderConfig(withOverride, "simulation").provider).toBe("anthropic");
+  });
+
   it("replaces the default selection and clears overrides on global switch", () => {
     const withOverride = setRoleProviderSelection(fallback, "report", {
       provider: "openai",

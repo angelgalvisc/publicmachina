@@ -86,9 +86,9 @@ export async function handleModelCommand(
     io.output("  /model list\n");
     io.output("  /model use <model-id-or-label>\n");
     io.output("  /model provider <anthropic|openai|moonshot>\n");
-    io.output("  /model use <model> --role <analysis|generation|simulation|report>\n");
-    io.output("  /model provider <provider> --role <analysis|generation|simulation|report>\n");
-    io.output("  /model reset --role <analysis|generation|simulation|report>\n");
+    io.output("  /model use <model> --role <analysis|generation|simulation|report|assistant>\n");
+    io.output("  /model provider <provider> --role <analysis|generation|simulation|report|assistant>\n");
+    io.output("  /model reset --role <analysis|generation|simulation|report|assistant>\n");
     io.output("  /model setup\n");
     io.output("Available providers:\n");
     for (const provider of SUPPORTED_PROVIDERS) {
@@ -140,7 +140,7 @@ export async function handleModelCommand(
 }
 
 export function extractRoleOption(input: string): { text: string; role?: ProviderRole } {
-  const match = input.match(/(?:^|\s)--role\s+(analysis|generation|simulation|report)\b/i);
+  const match = input.match(/(?:^|\s)--role\s+(analysis|generation|simulation|report|assistant)\b/i);
   if (!match) {
     return { text: input.trim() };
   }

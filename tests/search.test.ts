@@ -212,6 +212,28 @@ describe("search.ts", () => {
     expect(canActorSearch(blocked, "A", config.search)).toBe(false);
   });
 
+  it("matches search profession aliases across English and Spanish labels", () => {
+    const config = defaultConfig();
+    config.search.enabled = true;
+    config.search.allowProfessions = ["periodistas de mercados", "traders cripto"];
+
+    const marketsJournalist = makeActor({
+      id: "actor-markets-journalist",
+      archetype: "media",
+      profession: "markets journalist",
+      handle: "@markets",
+    });
+    const cryptoTrader = makeActor({
+      id: "actor-crypto-trader",
+      archetype: "persona",
+      profession: "crypto trader",
+      handle: "@crypto",
+    });
+
+    expect(canActorSearch(marketsJournalist, "A", config.search)).toBe(true);
+    expect(canActorSearch(cryptoTrader, "A", config.search)).toBe(true);
+  });
+
   it("selects search-enabled actors deterministically under per-round and per-tier budgets", () => {
     const config = defaultConfig();
     config.search.enabled = true;

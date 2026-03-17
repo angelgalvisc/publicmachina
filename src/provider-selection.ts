@@ -17,7 +17,7 @@ import {
   type SupportedProvider,
 } from "./model-catalog.js";
 
-export const PROVIDER_ROLES = ["analysis", "generation", "simulation", "report"] as const;
+export const PROVIDER_ROLES = ["analysis", "generation", "simulation", "report", "assistant"] as const;
 export type ProviderRole = (typeof PROVIDER_ROLES)[number];
 
 export interface ProviderConfig {
@@ -206,6 +206,7 @@ export function resolveProviderConfigs(
     generation: resolveProviderConfig(providers, "generation"),
     simulation: resolveProviderConfig(providers, "simulation"),
     report: resolveProviderConfig(providers, "report"),
+    assistant: resolveProviderConfig(providers, "assistant"),
   };
 }
 

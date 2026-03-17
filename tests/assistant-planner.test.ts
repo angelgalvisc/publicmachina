@@ -156,4 +156,37 @@ describe("assistant-planner.ts", () => {
       expect(decision.meta.model).toBe("heuristic");
     }
   });
+
+  it("routes a structured English brief to design_simulation without relying on the model", async () => {
+    const llm = new MockLLMClient();
+
+    const decision = await planAssistantStep(llm, {
+      contextSummary: "Operator identity: PublicMachina.",
+      currentTaskSummary: "- Status: idle",
+      conversation: [],
+      userInput: [
+        "Design a new simulation from scratch and replace any previous design.",
+        "",
+        "Title:",
+        "NVIDIA NemoClaw and Bitcoin",
+        "",
+        "Primary source:",
+        "https://example.com/nemoclaw",
+        "",
+        "Document context:",
+        "./inputs/nemoclaw-btc",
+        "",
+        "Objective:",
+        "Assess whether the story can materially change Bitcoin sentiment.",
+      ].join("\n"),
+      tools: ASSISTANT_TOOLS,
+    });
+
+    expect(decision.kind).toBe("tool_call");
+    if (decision.kind === "tool_call") {
+      expect(decision.tool).toBe("design_simulation");
+      expect(decision.arguments.docsPath).toBe("./inputs/nemoclaw-btc");
+      expect(decision.meta.model).toBe("heuristic");
+    }
+  });
 });
