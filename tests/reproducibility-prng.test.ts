@@ -370,7 +370,13 @@ describe("Snapshots", () => {
       },
     ];
 
-    saveSnapshot(store, "run-1", 10, actorStates, narrativeStates, prng);
+    saveSnapshot(store, {
+      runId: "run-1",
+      roundNum: 10,
+      actorStates,
+      narrativeStates,
+      rng: prng,
+    });
 
     const restored = restoreSnapshot(store, "run-1");
     expect(restored).not.toBeNull();
@@ -402,8 +408,20 @@ describe("Snapshots", () => {
     const prng2 = new SeedablePRNG(42);
     for (let i = 0; i < 20; i++) prng2.next();
 
-    saveSnapshot(store, "run-1", 5, [], [{ topic: "old", currentIntensity: 0.3, totalPosts: 10, dominantSentiment: 0, peakRound: 3 }], prng1);
-    saveSnapshot(store, "run-1", 10, [], [{ topic: "new", currentIntensity: 0.8, totalPosts: 42, dominantSentiment: -0.5, peakRound: 8 }], prng2);
+    saveSnapshot(store, {
+      runId: "run-1",
+      roundNum: 5,
+      actorStates: [],
+      narrativeStates: [{ topic: "old", currentIntensity: 0.3, totalPosts: 10, dominantSentiment: 0, peakRound: 3 }],
+      rng: prng1,
+    });
+    saveSnapshot(store, {
+      runId: "run-1",
+      roundNum: 10,
+      actorStates: [],
+      narrativeStates: [{ topic: "new", currentIntensity: 0.8, totalPosts: 42, dominantSentiment: -0.5, peakRound: 8 }],
+      rng: prng2,
+    });
 
     const restored = restoreSnapshot(store, "run-1");
     expect(restored!.roundNum).toBe(10);
@@ -424,7 +442,13 @@ describe("Snapshots", () => {
     for (let i = 0; i < 25; i++) prng.next();
 
     // Save after 25 steps
-    saveSnapshot(store, "run-1", 25, [], [], prng);
+    saveSnapshot(store, {
+      runId: "run-1",
+      roundNum: 25,
+      actorStates: [],
+      narrativeStates: [],
+      rng: prng,
+    });
 
     // Continue original for 10 more
     const nextFromOriginal = Array.from({ length: 10 }, () => prng.next());

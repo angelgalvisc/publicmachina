@@ -9,7 +9,7 @@
  * Used only by SQLiteGraphStore constructor.
  */
 
-export const CURRENT_SCHEMA_VERSION = 3;
+export const CURRENT_SCHEMA_VERSION = 4;
 
 export const SCHEMA_SQL = `
 -- ═══════════════════════════════════════
@@ -140,6 +140,9 @@ CREATE TABLE IF NOT EXISTS run_manifest (
   total_rounds INTEGER,
   status TEXT DEFAULT 'running',
   resumed_from TEXT,
+  replayed_from_run TEXT,
+  replay_source_db TEXT,
+  replay_started_at TEXT,
   version TEXT
 );
 

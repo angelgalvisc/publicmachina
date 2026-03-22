@@ -1136,6 +1136,9 @@ async function runReplayCommand(
     status: "paused",
     finished_at: undefined,
     total_rounds: copiedRun.total_rounds,
+    replayed_from_run: runId,
+    replay_source_db: opts.db,
+    replay_started_at: new Date().toISOString(),
   });
 
   const backend = new RecordedBackend(
@@ -1161,6 +1164,7 @@ async function runReplayCommand(
 
     io.stdout(`Replay ${result.status}\n`);
     io.stdout(`  Source run: ${runId}\n`);
+    io.stdout(`  Source DB: ${opts.db}\n`);
     io.stdout(`  Replay DB: ${outDb}\n`);
     io.stdout(`  Completed rounds: ${result.completedRounds}/${result.totalRounds}\n`);
     io.stdout(`  Wall time: ${(result.wallTimeMs / 1000).toFixed(1)}s\n`);

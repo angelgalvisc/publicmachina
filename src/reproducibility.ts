@@ -229,42 +229,37 @@ export interface NarrativeSnapshot {
   peakRound: number | null;
 }
 
+export interface SaveSnapshotInput {
+  runId: string;
+  roundNum: number;
+  actorStates: ActorStateSnapshot[];
+  narrativeStates: NarrativeSnapshot[];
+  firedTriggers?: Set<string>;
+  rng: SeedablePRNG;
+}
+
 /**
  * Save a snapshot of simulation state to the database.
  */
-export function saveSnapshot(
-  store: GraphStore,
-  runId: string,
-  roundNum: number,
-  actorStates: ActorStateSnapshot[],
-  narrativeStates: NarrativeSnapshot[],
-  firedTriggersOrRng: Set<string> | SeedablePRNG,
-  maybeRng?: SeedablePRNG
-): void {
-  const firedTriggers = maybeRng === undefined ? new Set<string>() : firedTriggersOrRng as Set<string>;
-  const rng = (maybeRng === undefined ? firedTriggersOrRng : maybeRng) as SeedablePRNG | undefined;
-  if (!rng) {
-    throw new Error("saveSnapshot requires a PRNG instance.");
-  }
-
+export function saveSnapshot(store: GraphStore, input: SaveSnapshotInput): void {
   const actorMap: Record<string, ActorStateSnapshot> = {};
-  for (const a of actorStates) {
+  for (const a of input.actorStates) {
     actorMap[a.id] = a;
   }
 
   const id = createHash("sha256")
-    .update(`${runId}|snapshot|${roundNum}`)
+    .update(`${input.runId}|snapshot|${input.roundNum}`)
     .digest("hex")
     .slice(0, 32);
 
   store.saveSnapshot({
     id,
-    run_id: runId,
-    round_num: roundNum,
+    run_id: input.runId,
+    round_num: input.roundNum,
     actor_states: JSON.stringify(actorMap),
-    narrative_states: JSON.stringify(narrativeStates),
-    fired_triggers: JSON.stringify([...firedTriggers]),
-    rng_state: rng.state(),
+    narrative_states: JSON.stringify(input.narrativeStates),
+    fired_triggers: JSON.stringify([...(input.firedTriggers ?? new Set<string>())]),
+    rng_state: input.rng.state(),
   });
 }
 

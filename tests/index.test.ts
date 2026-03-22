@@ -15,11 +15,15 @@ import { afterEach, describe, expect, it } from "vitest";
 import { SQLiteGraphStore } from "../src/db.js";
 import type { ActorRow } from "../src/db.js";
 import { buildInteractiveDesignBrief, runCli, runInitCommand } from "../src/index.js";
-import { defaultConfig, loadConfig, saveConfig } from "../src/config.js";
+import { defaultConfig, loadConfig, sanitizeForStorage, saveConfig } from "../src/config.js";
 import { bootstrapAssistantWorkspace, recordSimulationHistory, resolveAssistantWorkspace } from "../src/assistant-workspace.js";
 import { readStopRequest } from "../src/run-control.js";
 import { resolveProviderConfig } from "../src/provider-selection.js";
 import { updateRound } from "../src/telemetry.js";
+import { SeedablePRNG, saveSnapshot } from "../src/reproducibility.js";
+import { DirectLLMBackend, getPromptVersion } from "../src/cognition.js";
+import { MockLLMClient } from "../src/llm.js";
+import { runSimulation } from "../src/engine.js";
 
 const tempDirs: string[] = [];
 
@@ -58,6 +62,18 @@ function makeActor(overrides: Partial<ActorRow> = {}): ActorRow {
     follower_count: 50,
     following_count: 30,
     ...overrides,
+  };
+}
+
+function makeSnapshotActorState(actor: ActorRow) {
+  return {
+    id: actor.id,
+    stance: actor.stance,
+    sentiment_bias: actor.sentiment_bias,
+    activity_level: actor.activity_level,
+    influence_weight: actor.influence_weight,
+    follower_count: actor.follower_count,
+    following_count: actor.following_count,
   };
 }
 
@@ -314,6 +330,154 @@ describe("CLI pipeline", () => {
 
     expect(capture.getStdout()).toContain(actor.name);
     expect(capture.getStdout()).toContain("Personality:");
+  });
+});
+
+describe("CLI resume/replay", () => {
+  it("resumes a cancelled run from the latest snapshot", async () => {
+    const dbPath = makeTempDbPath();
+    const config = defaultConfig();
+    config.search.enabled = false;
+    config.simulation.totalHours = 2;
+    config.simulation.minutesPerRound = 60;
+
+    const store = new SQLiteGraphStore(dbPath);
+    store.createRun({
+      id: "resume-run",
+      started_at: "2026-03-22T00:00:00.000Z",
+      seed: config.simulation.seed,
+      config_snapshot: sanitizeForStorage(config),
+      graph_revision_id: "resume-rev",
+      status: "cancelled",
+      total_rounds: 2,
+    });
+    const actor = makeActor({
+      id: "resume-actor",
+      run_id: "resume-run",
+      handle: "@resume",
+      influence_weight: 0.9,
+      archetype: "institution",
+    });
+    store.addActor(actor);
+    store.addActorTopic(actor.id, "education", 1.0);
+    store.addActorBelief(actor.id, "education", 0.1, 0);
+    saveSnapshot(store, {
+      runId: "resume-run",
+      roundNum: 0,
+      actorStates: [makeSnapshotActorState(actor)],
+      narrativeStates: [],
+      rng: new SeedablePRNG(config.simulation.seed),
+    });
+    store.close();
+
+    const capture = makeIO();
+    await runCli(
+      [
+        "node",
+        "publicmachina",
+        "resume",
+        "--db",
+        dbPath,
+        "--run",
+        "resume-run",
+        "--offline",
+        "--mock",
+      ],
+      capture.io
+    );
+
+    expect(capture.getStdout()).toContain("Resume completed");
+    expect(capture.getStdout()).toContain("Resumed from round: 0");
+
+    const verifyStore = new SQLiteGraphStore(dbPath);
+    const run = verifyStore.getRun("resume-run");
+    const summary = verifyStore.getRunRoundSummary("resume-run");
+    verifyStore.close();
+
+    expect(run?.status).toBe("completed");
+    expect(summary.roundsCompleted).toBe(1);
+  });
+
+  it("replays a completed run into a copied database and records provenance", async () => {
+    const dbPath = makeTempDbPath();
+    const replayDbPath = dbPath.replace(/\.db$/i, ".replay.db");
+    const config = defaultConfig();
+    config.search.enabled = false;
+    config.simulation.totalHours = 1;
+    config.simulation.minutesPerRound = 60;
+
+    const store = new SQLiteGraphStore(dbPath);
+    store.createRun({
+      id: "replay-run",
+      started_at: "2026-03-22T00:00:00.000Z",
+      seed: config.simulation.seed,
+      config_snapshot: sanitizeForStorage(config),
+      graph_revision_id: "replay-rev",
+      status: "paused",
+      total_rounds: 1,
+    });
+    const actor = makeActor({
+      id: "replay-actor",
+      run_id: "replay-run",
+      handle: "@replay",
+      influence_weight: 0.95,
+      archetype: "institution",
+    });
+    store.addActor(actor);
+    store.addActorTopic(actor.id, "education", 1.0);
+    store.addActorBelief(actor.id, "education", 0.2, 0);
+
+    const llm = new MockLLMClient();
+    llm.setResponse(
+      "YOUR FEED:",
+      JSON.stringify({
+        action: "post",
+        content: "Replay source post",
+        reasoning: "cached for replay",
+      })
+    );
+    const backend = new DirectLLMBackend(llm, store, {
+      runId: "replay-run",
+      promptVersion: getPromptVersion(),
+    });
+    await runSimulation({
+      store,
+      config,
+      backend,
+      runId: "replay-run",
+    });
+    store.close();
+
+    const capture = makeIO();
+    await runCli(
+      [
+        "node",
+        "publicmachina",
+        "replay",
+        "--db",
+        dbPath,
+        "--run",
+        "replay-run",
+        "--out-db",
+        replayDbPath,
+      ],
+      capture.io
+    );
+
+    expect(capture.getStdout()).toContain("Replay completed");
+    expect(capture.getStdout()).toContain(`Source DB: ${dbPath}`);
+    expect(capture.getStdout()).toContain(`Replay DB: ${replayDbPath}`);
+
+    const replayStore = new SQLiteGraphStore(replayDbPath);
+    const run = replayStore.getRun("replay-run");
+    const summary = replayStore.getRunRoundSummary("replay-run");
+    replayStore.close();
+
+    expect(run?.status).toBe("completed");
+    expect(run?.replayed_from_run).toBe("replay-run");
+    expect(run?.replay_source_db).toBe(dbPath);
+    expect(run?.replay_started_at).toBeTruthy();
+    expect(summary.roundsCompleted).toBe(1);
   });
 });
 

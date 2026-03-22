@@ -251,6 +251,13 @@ describe("SQLiteGraphStore", () => {
       )
       .all() as Array<{ name: string }>;
     expect(tables.map((row) => row.name)).toEqual(["decision_traces", "run_scaffolds"]);
+
+    const runManifestColumns = store.db
+      .prepare("PRAGMA table_info(run_manifest)")
+      .all() as Array<{ name: string }>;
+    expect(runManifestColumns.map((column) => column.name)).toContain("replayed_from_run");
+    expect(runManifestColumns.map((column) => column.name)).toContain("replay_source_db");
+    expect(runManifestColumns.map((column) => column.name)).toContain("replay_started_at");
   });
 
   // ─── PRAGMAs ───

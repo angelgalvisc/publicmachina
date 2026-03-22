@@ -321,15 +321,14 @@ export async function runSimulation(opts: EngineOptions): Promise<EngineResult> 
                 skippedRound.roundNum > 0 &&
                 skippedRound.roundNum % config.simulation.snapshotEvery === 0
               ) {
-                saveSnapshot(
-                  store,
+                saveSnapshot(store, {
                   runId,
-                  skippedRound.roundNum,
+                  roundNum: skippedRound.roundNum,
                   actorStates,
-                  buildNarrativeSnapshotState(skippedRound.narratives),
+                  narrativeStates: buildNarrativeSnapshotState(skippedRound.narratives),
                   firedTriggers,
-                  rng
-                );
+                  rng,
+                });
               }
             }
 
@@ -564,15 +563,14 @@ export async function runSimulation(opts: EngineOptions): Promise<EngineResult> 
         roundNum > 0 &&
         roundNum % config.simulation.snapshotEvery === 0
       ) {
-        saveSnapshot(
-          store,
+        saveSnapshot(store, {
           runId,
           roundNum,
-          buildActorSnapshotState(store, runId),
-          buildNarrativeSnapshotState(store.getNarrativesByRun(runId)),
+          actorStates: buildActorSnapshotState(store, runId),
+          narrativeStates: buildNarrativeSnapshotState(store.getNarrativesByRun(runId)),
           firedTriggers,
-          rng
-        );
+          rng,
+        });
       }
     }
 
@@ -596,15 +594,14 @@ export async function runSimulation(opts: EngineOptions): Promise<EngineResult> 
       const latestSnapshot = store.getLatestSnapshot(runId);
       const lastCompletedRound = completedRounds - 1;
       if (lastCompletedRound >= 0 && latestSnapshot?.round_num !== lastCompletedRound) {
-        saveSnapshot(
-          store,
+        saveSnapshot(store, {
           runId,
-          lastCompletedRound,
-          buildActorSnapshotState(store, runId),
-          buildNarrativeSnapshotState(store.getNarrativesByRun(runId)),
+          roundNum: lastCompletedRound,
+          actorStates: buildActorSnapshotState(store, runId),
+          narrativeStates: buildNarrativeSnapshotState(store.getNarrativesByRun(runId)),
           firedTriggers,
-          rng
-        );
+          rng,
+        });
       }
       store.updateRun(runId, {
         status: "cancelled",
@@ -630,15 +627,14 @@ export async function runSimulation(opts: EngineOptions): Promise<EngineResult> 
     const latestSnapshot = store.getLatestSnapshot(runId);
     const lastCompletedRound = completedRounds - 1;
     if (lastCompletedRound >= 0 && latestSnapshot?.round_num !== lastCompletedRound) {
-      saveSnapshot(
-        store,
+      saveSnapshot(store, {
         runId,
-        lastCompletedRound,
-        buildActorSnapshotState(store, runId),
-        buildNarrativeSnapshotState(store.getNarrativesByRun(runId)),
+        roundNum: lastCompletedRound,
+        actorStates: buildActorSnapshotState(store, runId),
+        narrativeStates: buildNarrativeSnapshotState(store.getNarrativesByRun(runId)),
         firedTriggers,
-        rng
-      );
+        rng,
+      });
     }
     store.updateRun(runId, {
       status: "failed",

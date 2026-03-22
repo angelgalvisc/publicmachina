@@ -566,6 +566,9 @@ export interface RunManifest {
   total_rounds?: number;
   status: "running" | "completed" | "failed" | "paused" | "cancelled";
   resumed_from?: string;
+  replayed_from_run?: string;
+  replay_source_db?: string;
+  replay_started_at?: string;
   version?: string;
 }
 

@@ -8,6 +8,7 @@
 import Database from "better-sqlite3";
 import { randomUUID, createHash } from "node:crypto";
 import { CURRENT_SCHEMA_VERSION, SCHEMA_SQL } from "./schema.js";
+import { applyStoreMigrations } from "./migrations.js";
 import type {
   DocumentRecord,
   Chunk,
@@ -361,111 +362,11 @@ export class SQLiteGraphStore implements GraphStore {
 
     // Initialize schema
     this.db.exec(SCHEMA_SQL);
-    this.runMigrations();
-  }
-
-  private runMigrations(): void {
-    const currentVersion = this.getSchemaVersion();
-    const migrations: Array<{ version: number; apply: () => void }> = [
-      {
-        version: 1,
-        apply: () => {
-          this.ensureColumn(
-            "posts",
-            "post_kind",
-            "ALTER TABLE posts ADD COLUMN post_kind TEXT DEFAULT 'post'"
-          );
-          this.ensureColumn(
-            "posts",
-            "is_deleted",
-            "ALTER TABLE posts ADD COLUMN is_deleted INTEGER DEFAULT 0"
-          );
-          this.ensureColumn("posts", "deleted_at", "ALTER TABLE posts ADD COLUMN deleted_at TEXT");
-          this.ensureColumn(
-            "posts",
-            "moderation_status",
-            "ALTER TABLE posts ADD COLUMN moderation_status TEXT DEFAULT 'none'"
-          );
-        },
-      },
-      {
-        version: 2,
-        apply: () => {
-          this.ensureColumn(
-            "snapshots",
-            "fired_triggers",
-            "ALTER TABLE snapshots ADD COLUMN fired_triggers TEXT DEFAULT '[]'"
-          );
-        },
-      },
-      {
-        version: 3,
-        apply: () => {
-          this.db.exec(`
-            CREATE TABLE IF NOT EXISTS run_scaffolds (
-              run_id TEXT PRIMARY KEY,
-              scaffold_json TEXT NOT NULL,
-              created_at TEXT DEFAULT (datetime('now')),
-              FOREIGN KEY (run_id) REFERENCES run_manifest(id)
-            );
-
-            CREATE TABLE IF NOT EXISTS decision_traces (
-              id TEXT PRIMARY KEY,
-              run_id TEXT NOT NULL,
-              round_num INTEGER NOT NULL,
-              actor_id TEXT NOT NULL,
-              route_tier TEXT NOT NULL,
-              route_reason TEXT,
-              search_eligible INTEGER DEFAULT 0,
-              search_selected INTEGER DEFAULT 0,
-              search_queries TEXT,
-              search_request_ids TEXT,
-              request_hash TEXT,
-              model_id TEXT,
-              prompt_version TEXT,
-              raw_decision TEXT,
-              normalized_decision TEXT,
-              final_action TEXT,
-              normalization_reason TEXT,
-              tier_c_rule_reason TEXT,
-              created_at TEXT DEFAULT (datetime('now')),
-              FOREIGN KEY (run_id) REFERENCES run_manifest(id),
-              FOREIGN KEY (actor_id) REFERENCES actors(id)
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_decision_traces_run_round ON decision_traces(run_id, round_num);
-            CREATE INDEX IF NOT EXISTS idx_decision_traces_actor ON decision_traces(run_id, actor_id, round_num DESC);
-          `);
-        },
-      },
-    ];
-
-    for (const migration of migrations) {
-      if (migration.version <= currentVersion) continue;
-      this.db.transaction(() => {
-        migration.apply();
-        this.setSchemaVersion(migration.version);
-      })();
+    applyStoreMigrations(this.db);
+    const version = this.db.pragma("user_version", { simple: true });
+    if (version !== CURRENT_SCHEMA_VERSION) {
+      this.db.pragma(`user_version = ${CURRENT_SCHEMA_VERSION}`);
     }
-
-    if (this.getSchemaVersion() < CURRENT_SCHEMA_VERSION) {
-      this.setSchemaVersion(CURRENT_SCHEMA_VERSION);
-    }
-  }
-
-  private ensureColumn(table: string, column: string, ddl: string): void {
-    const rows = this.db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
-    if (rows.some((row) => row.name === column)) return;
-    this.db.exec(ddl);
-  }
-
-  private getSchemaVersion(): number {
-    const row = this.db.pragma("user_version", { simple: true });
-    return typeof row === "number" ? row : 0;
-  }
-
-  private setSchemaVersion(version: number): void {
-    this.db.pragma(`user_version = ${version}`);
   }
 
   // ─── Provenance ───
@@ -1627,8 +1528,9 @@ export class SQLiteGraphStore implements GraphStore {
     this.db
       .prepare(
         `INSERT INTO run_manifest (id, started_at, seed, config_snapshot, hypothesis, docs_hash,
-         graph_revision_id, total_rounds, status, resumed_from, version)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         graph_revision_id, total_rounds, status, resumed_from, replayed_from_run,
+         replay_source_db, replay_started_at, version)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         manifest.id,
@@ -1641,6 +1543,9 @@ export class SQLiteGraphStore implements GraphStore {
         manifest.total_rounds ?? null,
         manifest.status,
         manifest.resumed_from ?? null,
+        manifest.replayed_from_run ?? null,
+        manifest.replay_source_db ?? null,
+        manifest.replay_started_at ?? null,
         manifest.version ?? null
       );
     return manifest.id;
