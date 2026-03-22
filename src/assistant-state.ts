@@ -45,6 +45,7 @@ export interface PendingRunConfirmation {
   dbPath: string;
   runId: string;
   historyRecordId: string | null;
+  offline: boolean;
   estimate: PersistedRunEstimate;
 }
 
@@ -119,6 +120,12 @@ export function loadAssistantTaskState(layout: AssistantWorkspaceLayout): Assist
     return {
       ...structuredClone(DEFAULT_STATE),
       ...parsed,
+      pendingRun: parsed.pendingRun
+        ? {
+            ...parsed.pendingRun,
+            offline: parsed.pendingRun.offline ?? false,
+          }
+        : null,
       sessionUsage: {
         ...structuredClone(DEFAULT_STATE).sessionUsage,
         ...(parsed.sessionUsage ?? {}),

@@ -160,7 +160,7 @@ describe("assistant-tools hardening", () => {
       })
     );
 
-    const result = await executeAssistantTool("run_simulation", {}, fixture.runtime);
+    const result = await executeAssistantTool("run_simulation", { offline: true }, fixture.runtime);
     expect(result.status).toBe("error");
     expect(result.summary).toContain("exceed the current operator session budget");
     expect(result.details).toContain("session cap");
@@ -229,7 +229,7 @@ describe("assistant-tools hardening", () => {
 
     const result = await executeAssistantTool(
       "run_simulation",
-      { confirmed: true },
+      { confirmed: true, offline: true },
       fixture.runtime
     );
 
@@ -294,7 +294,7 @@ describe("assistant-tools hardening", () => {
       expect(materializedDoc).toContain("Source URL:");
       expect(materializedDoc).toContain("NemoClaw Article");
 
-      const runResult = await executeAssistantTool("run_simulation", {}, fixture.runtime);
+      const runResult = await executeAssistantTool("run_simulation", { offline: true }, fixture.runtime);
       expect(runResult.status).toBe("needs_confirmation");
     } finally {
       vi.unstubAllGlobals();
@@ -327,5 +327,32 @@ describe("assistant-tools hardening", () => {
     expect(designedTools).toContain("run_simulation");
     expect(designedTools).not.toContain("stop_simulation");
     expect(designedTools).not.toContain("generate_report");
+  });
+
+  it("rejects operator runs that are not grounded unless offline is explicit", async () => {
+    const fixture = createRuntimeFixture();
+    const specPath = join(fixture.rootDir, "simulation.spec.json");
+    writeFileSync(specPath, "{}\n", "utf-8");
+
+    fixture.runtime.updateTaskState(
+      setDesignedSimulationState(fixture.workspace, {
+        title: "Grounding test",
+        brief: "Run with default search settings.",
+        objective: "Ensure the operator enforces grounding by default",
+        hypothesis: null,
+        docsPath: fixture.docsPath,
+        actorCount: 10,
+        specPath,
+        configPath: fixture.configPath,
+        historyRecordId: null,
+        workspaceDir: fixture.workspace.rootDir,
+        rounds: 16,
+      })
+    );
+
+    const result = await executeAssistantTool("run_simulation", {}, fixture.runtime);
+    expect(result.status).toBe("error");
+    expect(result.summary).toBe("Tool run_simulation failed.");
+    expect(result.details).toContain("Grounded runs require search.enabled=true");
   });
 });

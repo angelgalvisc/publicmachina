@@ -5,7 +5,7 @@ This document covers the active operational surface of PublicMachina:
 - local development runs
 - packaged CLI installs
 - containerized batch runs
-- optional SearXNG integration
+- SearXNG is required for grounded runs unless you explicitly pass `--offline`
 - filesystem and secret-handling rules
 
 It complements `README.md` and [docs/architecture.md](docs/architecture.md). Historical notes about deferred external runtimes belong in `IMPLEMENTATION_HISTORY.md`, not here.
@@ -19,7 +19,7 @@ The active runtime is:
 - one Node.js process running the CLI
 - one SQLite database per environment or experiment
 - optional access to a live LLM provider
-- optional access to a self-hosted SearXNG instance for web-grounded search
+- access to a self-hosted SearXNG instance for web-grounded search, unless you intentionally run offline
 
 There is no required sidecar gateway in the active product.
 
@@ -126,9 +126,9 @@ Treat these paths explicitly:
 
 Do not mount or expose an entire home directory into a container just to run PublicMachina.
 
-## Optional SearXNG
+## SearXNG for grounded runs
 
-PublicMachina can enrich Tier A/B cognition with real web search through SearXNG.
+PublicMachina enriches Tier A/B cognition with real web search through SearXNG. The product now treats grounded runs as the default. If SearXNG is unavailable, either bring it up or pass `--offline` explicitly for a non-grounded run.
 
 Operational guidance:
 

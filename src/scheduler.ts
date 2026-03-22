@@ -28,10 +28,12 @@ import {
   buildSimContext,
   routeCognition,
 } from "./cognition.js";
+import { hashDecisionRequest } from "./reproducibility.js";
 import type { PlatformState, PRNG } from "./db.js";
 import type { SearchProvider } from "./search.js";
 import {
   buildSearchQueries,
+  canActorSearch,
   formatSearchResults,
   resolveSearchLanguage,
   searchWithCache,
@@ -51,6 +53,10 @@ export interface ScheduledActorAction {
   route: CognitionRoute;
   decision: DecisionResponse;
   searchRequests: SearchRequestRow[];
+  searchEligible: boolean;
+  searchSelected: boolean;
+  searchQueries: string[];
+  requestHash?: string;
 }
 
 interface PendingBackendDecision {
@@ -61,6 +67,9 @@ interface PendingBackendDecision {
   route: CognitionRoute;
   request: DecisionRequest;
   searchQueries: string[];
+  searchEligible: boolean;
+  searchSelected: boolean;
+  requestHash: string;
 }
 
 export interface RoundSchedulerOptions {
@@ -117,6 +126,9 @@ export async function scheduleRoundActions(
           availableActions
         ),
         searchRequests: [],
+        searchEligible: false,
+        searchSelected: false,
+        searchQueries: [],
       });
       continue;
     }
@@ -142,6 +154,9 @@ export async function scheduleRoundActions(
       opts.config.platform.name,
       opts.roundNum
     );
+    const searchEligible = opts.searchProvider
+      ? canActorSearch(actor, route.tier, opts.config.search)
+      : false;
     pending.push({
       index,
       actor,
@@ -150,6 +165,9 @@ export async function scheduleRoundActions(
       route,
       request,
       searchQueries: [],
+      searchEligible,
+      searchSelected: false,
+      requestHash: hashDecisionRequest(request),
     });
   }
 
@@ -158,7 +176,8 @@ export async function scheduleRoundActions(
     : new Set<string>();
 
   for (const job of pending) {
-    if (!selectedForSearch.has(job.actor.id)) continue;
+    job.searchSelected = selectedForSearch.has(job.actor.id);
+    if (!job.searchSelected) continue;
     job.searchQueries = buildSearchQueries(
       job.actor,
       job.actorTopics,
@@ -177,6 +196,10 @@ export async function scheduleRoundActions(
       actorTopics: job.actorTopics,
       feed: job.feed,
       route: job.route,
+      searchEligible: job.searchEligible,
+      searchSelected: job.searchSelected,
+      searchQueries: job.searchQueries,
+      requestHash: job.requestHash,
       ...(await resolveBackendDecision(job, opts)),
     })
   );
@@ -233,4 +256,3 @@ async function resolveBackendDecision(
     searchRequests,
   };
 }
-

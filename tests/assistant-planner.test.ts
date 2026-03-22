@@ -165,6 +165,26 @@ describe("assistant-planner.ts", () => {
     }
   });
 
+  it("passes offline=true when a confirmation explicitly asks for an offline run", async () => {
+    const llm = new MockLLMClient();
+
+    const decision = await planAssistantStep(llm, {
+      contextSummary: "Operator identity: PublicMachina.",
+      currentTaskSummary: "- Status: awaiting_confirmation\n- Pending run: run-1 (16 rounds)",
+      conversation: [],
+      userInput: "yes offline",
+      tools: ASSISTANT_TOOLS,
+    });
+
+    expect(decision.kind).toBe("tool_call");
+    if (decision.kind === "tool_call") {
+      expect(decision.tool).toBe("run_simulation");
+      expect(decision.arguments.confirmed).toBe(true);
+      expect(decision.arguments.offline).toBe(true);
+      expect(decision.meta.model).toBe("heuristic");
+    }
+  });
+
   it("routes a structured Spanish brief to design_simulation without relying on the model", async () => {
     const llm = new MockLLMClient();
 

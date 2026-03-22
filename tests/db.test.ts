@@ -14,6 +14,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { unlinkSync, existsSync } from "node:fs";
+import Database from "better-sqlite3";
 import {
   SQLiteGraphStore,
   uuid,
@@ -22,6 +23,7 @@ import {
   type ActorRow,
   type RunManifest,
 } from "../src/db.js";
+import { CURRENT_SCHEMA_VERSION } from "../src/schema.js";
 
 const TEST_DB = "/tmp/publicmachina-test-db.sqlite";
 
@@ -59,6 +61,7 @@ describe("SQLiteGraphStore", () => {
       "claims",
       "communities",
       "community_overlap",
+      "decision_traces",
       "decision_cache",
       "documents",
       "edge_claims",
@@ -77,6 +80,7 @@ describe("SQLiteGraphStore", () => {
       "post_embeddings",
       "rounds",
       "run_manifest",
+      "run_scaffolds",
       "search_cache",
       "search_requests",
       "snapshots",
@@ -86,6 +90,11 @@ describe("SQLiteGraphStore", () => {
     for (const table of expectedTables) {
       expect(tableNames).toContain(table);
     }
+  });
+
+  it("sets the schema user_version to the current migration level", () => {
+    const version = store.db.pragma("user_version", { simple: true }) as number;
+    expect(version).toBe(CURRENT_SCHEMA_VERSION);
   });
 
   it("creates all indices", () => {
@@ -99,6 +108,8 @@ describe("SQLiteGraphStore", () => {
 
     const expectedIndices = [
       "idx_decision_cache_lookup",
+      "idx_decision_traces_run_round",
+      "idx_decision_traces_actor",
       "idx_posts_run_round",
       "idx_posts_author",
       "idx_telemetry_run_round",
@@ -144,6 +155,102 @@ describe("SQLiteGraphStore", () => {
       .all();
 
     expect(tables.length).toBe(1);
+  });
+
+  it("upgrades a legacy database to the current schema version", () => {
+    store.close();
+    if (existsSync(TEST_DB)) unlinkSync(TEST_DB);
+
+    const legacy = new Database(TEST_DB);
+    legacy.exec(`
+      CREATE TABLE run_manifest (
+        id TEXT PRIMARY KEY,
+        started_at TEXT NOT NULL,
+        finished_at TEXT,
+        seed INTEGER NOT NULL,
+        config_snapshot TEXT NOT NULL,
+        hypothesis TEXT,
+        docs_hash TEXT,
+        graph_revision_id TEXT NOT NULL,
+        total_rounds INTEGER,
+        status TEXT DEFAULT 'running',
+        resumed_from TEXT,
+        version TEXT
+      );
+      CREATE TABLE actors (
+        id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL,
+        entity_id TEXT,
+        archetype TEXT NOT NULL,
+        cognition_tier TEXT NOT NULL DEFAULT 'B',
+        name TEXT NOT NULL,
+        handle TEXT,
+        personality TEXT NOT NULL,
+        bio TEXT,
+        age INTEGER,
+        gender TEXT,
+        profession TEXT,
+        region TEXT,
+        language TEXT DEFAULT 'es',
+        stance TEXT DEFAULT 'neutral',
+        sentiment_bias REAL DEFAULT 0.0,
+        activity_level REAL DEFAULT 0.5,
+        influence_weight REAL DEFAULT 0.5,
+        community_id TEXT,
+        active_hours TEXT,
+        follower_count INTEGER DEFAULT 100,
+        following_count INTEGER DEFAULT 50
+      );
+      CREATE TABLE posts (
+        id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL,
+        author_id TEXT NOT NULL,
+        content TEXT NOT NULL,
+        reply_to TEXT,
+        quote_of TEXT,
+        round_num INTEGER NOT NULL,
+        sim_timestamp TEXT NOT NULL,
+        likes INTEGER DEFAULT 0,
+        reposts INTEGER DEFAULT 0,
+        comments INTEGER DEFAULT 0,
+        reach INTEGER DEFAULT 0,
+        sentiment REAL
+      );
+      CREATE TABLE snapshots (
+        id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL,
+        round_num INTEGER NOT NULL,
+        created_at TEXT DEFAULT (datetime('now')),
+        actor_states TEXT NOT NULL,
+        narrative_states TEXT NOT NULL,
+        rng_state TEXT NOT NULL
+      );
+    `);
+    legacy.pragma("user_version = 0");
+    legacy.close();
+
+    store = new SQLiteGraphStore(TEST_DB);
+
+    const version = store.db.pragma("user_version", { simple: true }) as number;
+    expect(version).toBe(CURRENT_SCHEMA_VERSION);
+
+    const postColumns = store.db
+      .prepare("PRAGMA table_info(posts)")
+      .all() as Array<{ name: string }>;
+    expect(postColumns.map((column) => column.name)).toContain("post_kind");
+    expect(postColumns.map((column) => column.name)).toContain("moderation_status");
+
+    const snapshotColumns = store.db
+      .prepare("PRAGMA table_info(snapshots)")
+      .all() as Array<{ name: string }>;
+    expect(snapshotColumns.map((column) => column.name)).toContain("fired_triggers");
+
+    const tables = store.db
+      .prepare(
+        `SELECT name FROM sqlite_master WHERE type='table' AND name IN ('run_scaffolds','decision_traces') ORDER BY name`
+      )
+      .all() as Array<{ name: string }>;
+    expect(tables.map((row) => row.name)).toEqual(["decision_traces", "run_scaffolds"]);
   });
 
   // ─── PRAGMAs ───
@@ -683,6 +790,127 @@ describe("SQLiteGraphStore", () => {
       run = store.getRun(runId);
       expect(run!.status).toBe("completed");
       expect(run!.total_rounds).toBe(5);
+    });
+  });
+
+  describe("replay scaffolds", () => {
+    it("captures and restores a run scaffold", () => {
+      const runId = "run-scaffold";
+      store.createRun({
+        id: runId,
+        started_at: "2024-01-01T00:00:00",
+        seed: 42,
+        config_snapshot: "{}",
+        graph_revision_id: "rev-scaffold",
+        status: "paused",
+      });
+      store.addActor({
+        id: "actor-scaffold",
+        run_id: runId,
+        entity_id: null,
+        archetype: "persona",
+        cognition_tier: "B",
+        name: "Scaffold Actor",
+        handle: "@scaffold",
+        personality: "A scaffold actor",
+        bio: null,
+        age: 30,
+        gender: null,
+        profession: null,
+        region: null,
+        language: "es",
+        stance: "neutral",
+        sentiment_bias: 0,
+        activity_level: 0.5,
+        influence_weight: 0.5,
+        community_id: null,
+        active_hours: null,
+        follower_count: 50,
+        following_count: 10,
+      });
+      store.addActorTopic("actor-scaffold", "education", 0.9);
+      store.addActorBelief("actor-scaffold", "education", 0.3, 0);
+      store.addCommunity("community-1", runId, "community-1", "test", 0.5);
+      store.updateActorCommunity("actor-scaffold", "community-1");
+      store.addPost({
+        id: "seed-post-1",
+        run_id: runId,
+        author_id: "actor-scaffold",
+        content: "Seed post",
+        round_num: 0,
+        sim_timestamp: "2024-01-01T00:00:00",
+        likes: 0,
+        reposts: 0,
+        comments: 0,
+        reach: 0,
+        sentiment: 0.1,
+      });
+      store.addPostTopic("seed-post-1", "education");
+
+      const scaffold = store.captureRunScaffold(runId);
+      expect(scaffold.actors).toHaveLength(1);
+      expect(scaffold.posts).toHaveLength(1);
+
+      store.saveRunScaffold(runId, scaffold);
+      store.resetRunToScaffold(runId);
+
+      expect(store.getActorsByRun(runId)).toHaveLength(1);
+      expect(store.getRunScaffold(runId)?.posts).toHaveLength(1);
+    });
+  });
+
+  describe("decision traces", () => {
+    it("persists and lists decision traces", () => {
+      const runId = "run-trace";
+      store.createRun({
+        id: runId,
+        started_at: "2024-01-01T00:00:00",
+        seed: 42,
+        config_snapshot: "{}",
+        graph_revision_id: "rev-trace",
+        status: "running",
+      });
+      store.addActor({
+        id: "actor-trace",
+        run_id: runId,
+        entity_id: null,
+        archetype: "persona",
+        cognition_tier: "B",
+        name: "Trace Actor",
+        handle: "@trace",
+        personality: "A trace actor",
+        bio: null,
+        age: null,
+        gender: null,
+        profession: null,
+        region: null,
+        language: "es",
+        stance: "neutral",
+        sentiment_bias: 0,
+        activity_level: 0.5,
+        influence_weight: 0.5,
+        community_id: null,
+        active_hours: null,
+        follower_count: 10,
+        following_count: 5,
+      });
+
+      store.logDecisionTrace({
+        id: "trace-1",
+        run_id: runId,
+        round_num: 1,
+        actor_id: "actor-trace",
+        route_tier: "B",
+        route_reason: "random sampling",
+        search_eligible: 1,
+        search_selected: 1,
+        final_action: "post",
+      });
+
+      const traces = store.listDecisionTraces(runId, "actor-trace");
+      expect(traces).toHaveLength(1);
+      expect(traces[0].route_reason).toBe("random sampling");
+      expect(traces[0].final_action).toBe("post");
     });
   });
 

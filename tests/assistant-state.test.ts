@@ -63,6 +63,7 @@ describe("assistant-state.ts", () => {
       dbPath: "/tmp/simulation.db",
       runId: "run-123",
       historyRecordId: "hist-1",
+      offline: false,
       estimate: {
         rounds: 12,
         estimatedMinutes: 4,
@@ -100,6 +101,7 @@ describe("assistant-state.ts", () => {
       dbPath: "/tmp/simulation.db",
       runId: "run-456",
       historyRecordId: "hist-2",
+      offline: false,
       estimate: {
         rounds: 8,
         estimatedMinutes: 3,

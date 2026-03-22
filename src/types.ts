@@ -177,6 +177,39 @@ export interface ActorRow {
   following_count: number;
 }
 
+export interface ActorTopicRow {
+  actor_id: string;
+  topic: string;
+  weight: number;
+}
+
+export interface ActorBeliefRow {
+  actor_id: string;
+  topic: string;
+  sentiment: number;
+  round_updated: number | null;
+}
+
+export interface CommunityRow {
+  id: string;
+  run_id: string;
+  name: string;
+  description: string | null;
+  cohesion: number;
+}
+
+export interface CommunityOverlapRow {
+  community_a: string;
+  community_b: string;
+  run_id: string;
+  weight: number;
+}
+
+export interface PostTopicRow {
+  post_id: string;
+  topic: string;
+}
+
 // ─── Platform types ───
 
 export interface Post {
@@ -534,4 +567,37 @@ export interface RunManifest {
   status: "running" | "completed" | "failed" | "paused" | "cancelled";
   resumed_from?: string;
   version?: string;
+}
+
+export interface DecisionTraceRow {
+  id: string;
+  run_id: string;
+  round_num: number;
+  actor_id: string;
+  route_tier: string;
+  route_reason?: string | null;
+  search_eligible: number;
+  search_selected: number;
+  search_queries?: string | null;
+  search_request_ids?: string | null;
+  request_hash?: string | null;
+  model_id?: string | null;
+  prompt_version?: string | null;
+  raw_decision?: string | null;
+  normalized_decision?: string | null;
+  final_action?: string | null;
+  normalization_reason?: string | null;
+  tier_c_rule_reason?: string | null;
+  created_at?: string;
+}
+
+export interface RunScaffoldData {
+  actors: ActorRow[];
+  actorTopics: ActorTopicRow[];
+  actorBeliefs: ActorBeliefRow[];
+  communities: CommunityRow[];
+  communityOverlaps: CommunityOverlapRow[];
+  follows: Follow[];
+  posts: Post[];
+  postTopics: PostTopicRow[];
 }

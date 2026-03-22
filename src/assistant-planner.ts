@@ -4,6 +4,7 @@
 
 import type { LLMClient, LLMResponse } from "./llm.js";
 import type { AssistantToolDefinition, AssistantToolName } from "./assistant-tools.js";
+import { prefersOfflineMode } from "./grounding.js";
 
 export type AssistantPlannerDecision =
   | {
@@ -195,6 +196,15 @@ function normalizePlannerToolArguments(
   args: Record<string, unknown>,
   input: AssistantPlannerInput
 ): Record<string, unknown> {
+  if (tool === "run_simulation") {
+    return prefersOfflineMode(input.userInput)
+      ? {
+          ...args,
+          offline: true,
+        }
+      : args;
+  }
+
   if (tool !== "design_simulation") return args;
 
   const brief = input.userInput.trim();
@@ -290,15 +300,19 @@ function detectHeuristicPlannerDecision(
     /\b(correr|ejec[uú]tala|ejecutala|run it|run now|ejec[uú]talo|confirmed?|confirmo)\b/i.test(
       lower
     ) ||
-    /^(y|yes|sí|si|run|confirm)$/i.test(normalized);
+    /^(y|yes|sí|si|run|confirm)(\s+offline)?$/i.test(normalized);
   if (
     looksLikeRunRequest &&
     /\b(Status:\s*awaiting_confirmation|Pending run:)\b/i.test(input.currentTaskSummary)
   ) {
+    const offline = prefersOfflineMode(normalized);
     return {
       kind: "tool_call",
       tool: "run_simulation",
-      arguments: { confirmed: true },
+      arguments: {
+        confirmed: true,
+        ...(offline ? { offline: true } : {}),
+      },
       meta: {
         costUsd: 0,
         inputTokens: 0,

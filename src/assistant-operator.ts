@@ -35,6 +35,7 @@ import {
 } from "./assistant-tools.js";
 import { createFeatureLlm } from "./simulation-service.js";
 import { handleModelCommand } from "./model-command.js";
+import { prefersOfflineMode } from "./grounding.js";
 
 export interface AssistantOperatorIO {
   stdout(text: string): void;
@@ -110,7 +111,8 @@ export async function startAssistantOperator(
   recordAssistantMessage(session, conversation, "assistant", "Hello. I'm PublicMachina.");
 
   if (taskState.status === "awaiting_confirmation" && taskState.pendingRun && taskState.activeDesign) {
-    const pendingMessage = `I still have "${taskState.activeDesign.title}" ready to run. Reply yes to launch it, or no to keep the design without running.`;
+    const pendingMode = taskState.pendingRun.offline ? "offline" : "grounded";
+    const pendingMessage = `I still have "${taskState.activeDesign.title}" ready to run (${pendingMode}). Reply yes to launch it, or no to keep the design without running.`;
     io.stdout(`${pendingMessage}\n`);
     recordAssistantMessage(session, conversation, "assistant", pendingMessage);
   } else if (taskState.status === "running" && taskState.activeRun) {
@@ -251,7 +253,7 @@ export async function startAssistantOperator(
 
     if (taskState.status === "awaiting_confirmation" && taskState.pendingRun) {
       const normalized = input.toLowerCase();
-      if (/^(y|yes|run|confirm)$/i.test(normalized)) {
+      if (/^(y|yes|run|confirm)(\s+offline)?$/i.test(normalized)) {
         const pending = taskState.pendingRun;
         const result = await executeAssistantTool(
           "run_simulation",
@@ -260,6 +262,7 @@ export async function startAssistantOperator(
             configPath: pending.configPath,
             docsPath: pending.docsPath,
             confirmed: true,
+            offline: pending.offline || prefersOfflineMode(input),
           },
           runtime
         );
@@ -397,7 +400,9 @@ function summarizeTaskState(taskState: AssistantTaskState): string {
     lines.push(`- Config: ${taskState.activeDesign.configPath}`);
   }
   if (taskState.pendingRun) {
-    lines.push(`- Pending run: ${taskState.pendingRun.runId} (${taskState.pendingRun.estimate.rounds} rounds)`);
+    lines.push(
+      `- Pending run: ${taskState.pendingRun.runId} (${taskState.pendingRun.estimate.rounds} rounds, ${taskState.pendingRun.offline ? "offline" : "grounded"})`
+    );
   }
   if (taskState.lastCompletedRun) {
     lines.push(`- Last completed run: ${taskState.lastCompletedRun.runId} (${taskState.lastCompletedRun.title})`);

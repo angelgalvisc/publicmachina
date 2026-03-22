@@ -33,7 +33,7 @@ PublicMachina is useful anywhere collective behavior matters and recent informat
 | Science & public health | **A controversial vaccine announcement lands in a polarized environment** | Health authorities, skeptics, mainstream outlets, parents groups, and medical creators find real trial coverage and skepticism narratives before deciding what to amplify. |
 | Fiction & creative | **You want to pressure-test the third act of a screenplay or a lost ending** | Feed the world, characters, and constraints. Agents evolve from the material, interact, and can be interviewed afterward to explain why they took the side they did. |
 
-Every scenario runs on real internet context. Every agent decision is auditable. Every simulation is replayable.
+Grounded runs are the default path, with `--offline` as an explicit opt-out. Every agent decision is auditable. Simulations can be resumed from snapshots and replayed from SQLite artifacts.
 
 ## How it's different
 
@@ -95,7 +95,7 @@ The operator also ships with guardrails:
 - per-session spend caps for the operator
 - one active run per workspace by default
 
-For web-grounded search, add a [SearXNG instance](DEPLOYMENT.md). Without it, the engine still simulates, but agents do not read the news first.
+For web-grounded search, add a [SearXNG instance](DEPLOYMENT.md). Runs now require grounding by default; use `--offline` only when you explicitly want a non-grounded simulation.
 
 <details>
 <summary>Prerequisites and manual configuration</summary>
@@ -127,8 +127,8 @@ One file. Open it with `sqlite3`.
 - **Internet-grounded agents**: Tier A and B actors can search SearXNG before deciding, with exact temporal cutoff filtering applied by PublicMachina.
 - **Natural-language design**: describe a scenario in plain English and get a validated `simulation.spec.json` plus executable config. The conversational operator adds a second pass that proposes actors and communities from downloaded source documents.
 - **Conversational operator**: the default entrypoint is a conversation, not a wall of flags.
-- **Replayable alternate realities**: rerun the same scenario under different seeds, response strategies, or information cutoffs.
-- **Deterministic replay**: seedable PRNG plus cached web context keeps reruns inspectable.
+- **Replayable alternate realities**: resume interrupted runs from snapshots or replay completed runs from scaffold + decision cache.
+- **Deterministic replay**: seedable PRNG, recorded decisions, cached web context, and persisted run scaffolds keep reruns inspectable.
 - **3-tier cognition**: use expensive reasoning only where it matters and keep background populations cheap.
 - **Run safety**: stop cleanly, keep partial results, cap operator spend, and avoid overlapping runs inside one workspace.
 - **Social dynamics**: feed ranking, echo chambers, mutes, blocks, reports, narrative fatigue, and out-of-network exposure.
@@ -182,6 +182,8 @@ The design layer uses LLM to propose actors and communities from the brief and s
 | `analyze` | Ontology extraction and graph build. Pass `--spec` for entity type hints from cast design |
 | `generate` | Profile generation from graph entities. Pass `--spec` for focus actors, cast seeds, and communities |
 | `simulate` | Run an existing simulation |
+| `resume` | Resume a cancelled or failed run from the latest persisted snapshot |
+| `replay` | Copy a database and replay a run from scaffold + decision cache |
 | `stop` | Request a graceful stop for the active run |
 | `stats` | Print run metrics and tier breakdown |
 | `inspect` | Inspect actor context, beliefs, posts, and recent state |

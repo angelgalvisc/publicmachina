@@ -114,6 +114,7 @@ describe("CLI simulate", () => {
         "run-1",
         "--rounds",
         "1",
+        "--offline",
         "--mock",
       ],
       capture.io
@@ -230,6 +231,7 @@ describe("CLI pipeline", () => {
         "Negative sentiment spreads faster than positive",
         "--rounds",
         "2",
+        "--offline",
         "--mock",
       ],
       capture.io
@@ -294,6 +296,7 @@ describe("CLI pipeline", () => {
         "inspect-run",
         "--rounds",
         "1",
+        "--offline",
         "--mock",
       ],
       makeIO().io

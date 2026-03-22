@@ -32,7 +32,8 @@ import { generateProfiles } from "./profiles.js";
 import { designSimulationFromBrief, type CastDesign } from "./design.js";
 import { designCast } from "./cast-design.js";
 import { checkSearchHealth, createSearchProvider } from "./search.js";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { prepareGroundedRun } from "./grounding.js";
+import { copyFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 import pc from "picocolors";
 import {
@@ -73,6 +74,7 @@ import {
   executePipeline,
   ensureRunManifest,
 } from "./simulation-service.js";
+import { RecordedBackend, restoreSnapshot } from "./reproducibility.js";
 import {
   acquireActiveRunLock,
   clearStopRequest,
@@ -133,6 +135,21 @@ function parseIntOption(value: string, field: string): number {
 
 function getConfig(configPath?: string): SimConfig {
   return configPath ? loadConfig(configPath) : defaultConfig();
+}
+
+function buildRuntimeConfigFromRun(
+  run: { config_snapshot: string },
+  liveConfig: SimConfig
+): SimConfig {
+  const snapshot = JSON.parse(run.config_snapshot) as SimConfig;
+  const merged = structuredClone(snapshot);
+  // The stored snapshot is sanitized for durability. Restore live provider and
+  // assistant wiring from the caller's config while preserving the original
+  // simulation/search/feed/runtime parameters from the run itself.
+  merged.providers = structuredClone(liveConfig.providers);
+  merged.assistant = structuredClone(liveConfig.assistant);
+  merged.output = structuredClone(liveConfig.output);
+  return merged;
 }
 
 function readCliDocSummaries(docsPath: string, maxChars = 800): string[] {
@@ -923,6 +940,7 @@ async function runSimulateCommand(
     config?: string;
     run?: string;
     mock?: boolean;
+    offline?: boolean;
   },
   io: CliIO
 ): Promise<void> {
@@ -936,6 +954,7 @@ async function runSimulateCommand(
   if (opts.seed !== undefined) {
     config.simulation.seed = parseIntOption(opts.seed, "seed");
   }
+  config = await prepareGroundedRun(config, { offline: opts.offline });
 
   const store = new SQLiteGraphStore(opts.db);
   const runId = opts.run ?? uuid();
@@ -975,6 +994,180 @@ async function runSimulateCommand(
     io.stdout(`  Wall time: ${(result.wallTimeMs / 1000).toFixed(1)}s\n`);
   } finally {
     stopMonitor.cleanup();
+    store.close();
+  }
+}
+
+async function runResumeCommand(
+  opts: {
+    db: string;
+    config?: string;
+    run?: string;
+    mock?: boolean;
+    offline?: boolean;
+  },
+  io: CliIO
+): Promise<void> {
+  const liveConfig = getConfig(opts.config);
+  const store = new SQLiteGraphStore(opts.db);
+  const runId = opts.run ?? store.getLatestRunId();
+  if (!runId) {
+    store.close();
+    throw new Error("No runs found in database.");
+  }
+
+  const run = store.getRun(runId);
+  if (!run) {
+    store.close();
+    throw new Error(`Run ${runId} not found.`);
+  }
+  if (run.status === "completed") {
+    store.close();
+    throw new Error(`Run ${runId} is already completed; resume is only valid for paused/cancelled/failed runs.`);
+  }
+
+  const snapshot = restoreSnapshot(store, runId);
+  if (!snapshot) {
+    store.close();
+    throw new Error(`Run ${runId} has no snapshot to resume from.`);
+  }
+
+  const config = await prepareGroundedRun(buildRuntimeConfigFromRun(run, liveConfig), {
+    offline: opts.offline,
+  });
+  const backend = opts.mock
+    ? new MockCognitionBackend()
+    : new DirectLLMBackend(
+        new LLMClient(config.providers),
+        store,
+        {
+          runId,
+          promptVersion: getPromptVersion(),
+        }
+      );
+  const stopMonitor = createRunStopMonitor(config, io, {
+    configPath: opts.config,
+    runId,
+    source: "simulate",
+  });
+
+  try {
+    const result = await runSimulation({
+      store,
+      config,
+      backend,
+      runId,
+      startRound: snapshot.roundNum + 1,
+      initialRngState: snapshot.rngState,
+      initialFiredTriggers: snapshot.firedTriggers,
+      signal: stopMonitor.signal,
+      shouldStop: stopMonitor.shouldStop,
+    });
+
+    io.stdout(`Resume ${result.status}\n`);
+    io.stdout(`  Run ID: ${result.runId}\n`);
+    io.stdout(`  Resumed from round: ${snapshot.roundNum}\n`);
+    io.stdout(`  Completed rounds: ${result.completedRounds}/${result.totalRounds}\n`);
+    io.stdout(`  Wall time: ${(result.wallTimeMs / 1000).toFixed(1)}s\n`);
+    if (result.failureMessage) {
+      io.stdout(`  Failure: ${result.failureMessage}\n`);
+    }
+  } finally {
+    stopMonitor.cleanup();
+    store.close();
+  }
+}
+
+async function runReplayCommand(
+  opts: {
+    db: string;
+    outDb?: string;
+    config?: string;
+    run?: string;
+  },
+  io: CliIO
+): Promise<void> {
+  const sourceStore = new SQLiteGraphStore(opts.db);
+  const runId = opts.run ?? sourceStore.getLatestRunId();
+  if (!runId) {
+    sourceStore.close();
+    throw new Error("No runs found in database.");
+  }
+  const run = sourceStore.getRun(runId);
+  if (!run) {
+    sourceStore.close();
+    throw new Error(`Run ${runId} not found.`);
+  }
+  const replayMeta = sourceStore.getRunModelMetadata(runId);
+  if (!replayMeta) {
+    sourceStore.close();
+    throw new Error(`Run ${runId} has no cached model metadata for replay.`);
+  }
+  if (!sourceStore.getRunScaffold(runId)) {
+    sourceStore.close();
+    throw new Error(`Run ${runId} has no recorded scaffold; replay is unavailable for this run.`);
+  }
+
+  try {
+    sourceStore.db.pragma("wal_checkpoint(TRUNCATE)");
+  } catch {
+    // Best effort before copy.
+  } finally {
+    sourceStore.close();
+  }
+
+  const outDb =
+    opts.outDb ??
+    (opts.db.endsWith(".db")
+      ? opts.db.replace(/\.db$/i, `.replay.${runId}.db`)
+      : `${opts.db}.replay.${runId}.db`);
+  copyFileSync(opts.db, outDb);
+
+  const liveConfig = getConfig(opts.config);
+  const store = new SQLiteGraphStore(outDb);
+  const copiedRun = store.getRun(runId);
+  if (!copiedRun) {
+    store.close();
+    throw new Error(`Copied database is missing run ${runId}.`);
+  }
+  const config = buildRuntimeConfigFromRun(copiedRun, liveConfig);
+  store.resetRunToScaffold(runId);
+  store.updateRun(runId, {
+    status: "paused",
+    finished_at: undefined,
+    total_rounds: copiedRun.total_rounds,
+  });
+
+  const backend = new RecordedBackend(
+    store,
+    replayMeta.model_id,
+    replayMeta.prompt_version
+  );
+  const replaySearchProvider = {
+    async search(): Promise<never> {
+      throw new Error("Replay requires cached search results.");
+    },
+  };
+
+  try {
+    const result = await runSimulation({
+      store,
+      config,
+      backend,
+      runId,
+      startRound: 0,
+      searchProvider: replaySearchProvider,
+    });
+
+    io.stdout(`Replay ${result.status}\n`);
+    io.stdout(`  Source run: ${runId}\n`);
+    io.stdout(`  Replay DB: ${outDb}\n`);
+    io.stdout(`  Completed rounds: ${result.completedRounds}/${result.totalRounds}\n`);
+    io.stdout(`  Wall time: ${(result.wallTimeMs / 1000).toFixed(1)}s\n`);
+    if (result.failureMessage) {
+      io.stdout(`  Failure: ${result.failureMessage}\n`);
+    }
+  } finally {
     store.close();
   }
 }
@@ -1161,10 +1354,11 @@ async function runPipelineCommand(
     run?: string;
     spec?: string;
     mock?: boolean;
+    offline?: boolean;
   },
   io: CliIO
 ): Promise<void> {
-  const config = getConfig(opts.config);
+  let config = getConfig(opts.config);
   if (opts.rounds) {
     const rounds = parseIntOption(opts.rounds, "rounds");
     config.simulation.totalHours = (rounds * config.simulation.minutesPerRound) / 60;
@@ -1172,6 +1366,7 @@ async function runPipelineCommand(
   if (opts.seed !== undefined) {
     config.simulation.seed = parseIntOption(opts.seed, "seed");
   }
+  config = await prepareGroundedRun(config, { offline: opts.offline });
 
   const runId = opts.run ?? uuid();
   const stopMonitor = createRunStopMonitor(config, io, {
@@ -1315,13 +1510,24 @@ function runInspectCommand(
 
     const actor = resolveActorByName(store, runId, opts.actor);
     const context = store.queryActorContext(actor.id, runId);
+    const traces = store.listDecisionTraces(runId, actor.id).slice(0, 5);
 
     if (opts.json) {
-      io.stdout(JSON.stringify(context, null, 2) + "\n");
+      io.stdout(JSON.stringify({ ...context, decisionTraces: traces }, null, 2) + "\n");
       return;
     }
 
     io.stdout(formatActorContext(context) + "\n");
+    if (traces.length > 0) {
+      io.stdout("\nRecent decision trace:\n");
+      for (const trace of traces) {
+        io.stdout(
+          `  Round ${trace.round_num}: tier=${trace.route_tier}, action=${trace.final_action ?? "unknown"}, search=${trace.search_selected ? "yes" : trace.search_eligible ? "eligible-no" : "no"}\n`
+        );
+        if (trace.route_reason) io.stdout(`    route: ${trace.route_reason}\n`);
+        if (trace.normalization_reason) io.stdout(`    normalization: ${trace.normalization_reason}\n`);
+      }
+    }
   } finally {
     store.close();
   }
@@ -1480,6 +1686,7 @@ export function createProgram(io: CliIO = defaultIO): Command {
     .option("--config <path>", "config YAML file")
     .option("--run <id>", "run ID")
     .option("--spec <path>", "simulation spec JSON (provides cast design if available)")
+    .option("--offline", "explicitly disable web grounding for this run")
     .option("--mock", "use mock LLM + mock cognition backend")
     .action(async (opts) => {
       await runPipelineCommand(opts, io);
@@ -1533,9 +1740,41 @@ export function createProgram(io: CliIO = defaultIO): Command {
     .option("--seed <n>", "PRNG seed (0=random)")
     .option("--config <path>", "config YAML file")
     .option("--run <id>", "run ID (auto-generated if omitted)")
+    .option("--offline", "explicitly disable web grounding for this run")
     .option("--mock", "use MockCognitionBackend instead of DirectLLMBackend")
     .action(async (opts) => {
       await runSimulateCommand(opts, io);
+    });
+
+  program
+    .command("resume")
+    .description("Resume a cancelled or failed simulation from its latest snapshot")
+    .option("--db <path>", "SQLite database path", "simulation.db")
+    .option("--config <path>", "config YAML file", DEFAULT_CONFIG_PATH)
+    .option("--run <id>", "run ID (latest run if omitted)")
+    .option("--offline", "explicitly disable web grounding for this run")
+    .option("--mock", "use MockCognitionBackend instead of DirectLLMBackend")
+    .action(async (opts) => {
+      await runResumeCommand(opts, io);
+    });
+
+  program
+    .command("replay")
+    .description("Replay a run from scaffold + decision cache into a copied database")
+    .option("--db <path>", "source SQLite database path", "simulation.db")
+    .option("--out-db <path>", "output SQLite database path for the replayed run")
+    .option("--config <path>", "config YAML file", DEFAULT_CONFIG_PATH)
+    .option("--run <id>", "run ID (latest run if omitted)")
+    .action(async (opts) => {
+      await runReplayCommand(
+        {
+          db: opts.db,
+          outDb: opts.outDb,
+          config: opts.config,
+          run: opts.run,
+        },
+        io
+      );
     });
 
   // ═══════════════════════════════════════════════════════
@@ -1933,24 +2172,6 @@ export function createProgram(io: CliIO = defaultIO): Command {
 
       io.stdout(`\n  ${passed} passed, ${failed} failed\n`);
     });
-
-  // ═══════════════════════════════════════════════════════
-  // STUB COMMANDS (future phases)
-  // ═══════════════════════════════════════════════════════
-
-  const stubs = [
-    { name: "resume", desc: "Resume simulation from last snapshot" },
-    { name: "replay", desc: "Replay simulation from decision cache" },
-  ];
-
-  for (const stub of stubs) {
-    program
-      .command(stub.name)
-      .description(`${stub.desc} (not yet implemented)`)
-      .action(() => {
-        io.stdout(`"publicmachina ${stub.name}" is not yet implemented.\n`);
-      });
-  }
 
   return program;
 }

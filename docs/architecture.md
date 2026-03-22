@@ -237,6 +237,12 @@ Actor priority order:
 
 The engine, scheduler, feed, propagation, fatigue, events, memory, and moderation modules are deterministic given the same PRNG seed and cached web context. All state is persisted in SQLite.
 
+Replay/resume support now relies on two persisted artifacts in SQLite:
+- `snapshots` capture round checkpoints plus PRNG state and fired threshold triggers for resume.
+- `run_scaffolds` capture the pre-round simulation scaffold so a copied database can replay a run against `decision_cache`.
+
+SQLite schema evolution is versioned through `PRAGMA user_version`. Fresh databases are created at the current schema version, and legacy databases are upgraded forward through explicit migrations before the store is used.
+
 ### Pipeline concurrency
 
 LLM calls in the grounding layer (claims extraction, profile generation, seed posts) run with bounded concurrency controlled by `simulation.pipelineConcurrency` (default: 3). This is separate from `simulation.concurrency` which controls the runtime scheduler. Traces are written to the telemetry table with `action_type = 'pipeline_trace'`.
@@ -250,6 +256,7 @@ The simulation database centers on:
 - `actors`, `beliefs`, `topics`, `memories`
 - `posts`, `exposures`, `rounds`, `runs`
 - `search_cache`, `search_requests`
+- `decision_traces`, `run_scaffolds`, `snapshots`, `decision_cache`
 - telemetry, embeddings, moderation, and narrative state
 
 The full schema references already live in:

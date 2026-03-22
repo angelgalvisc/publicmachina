@@ -89,6 +89,7 @@ describe("published binary smoke test", () => {
       dbPath,
       "--run",
       "shell-smoke",
+      "--offline",
       "--mock",
     ]);
 

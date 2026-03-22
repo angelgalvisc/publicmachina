@@ -38,7 +38,7 @@ import {
   attachEmbeddingsToPlatformState,
   createEmbeddingProvider,
 } from "./embeddings.js";
-import { createSearchProvider } from "./search.js";
+import { createSearchProvider, type SearchProvider } from "./search.js";
 import { applyAutomaticModeration } from "./moderation.js";
 import {
   getAllowedActionsForTier,
@@ -85,6 +85,10 @@ export interface EngineOptions {
   config: SimConfig;
   backend: CognitionBackend;
   runId?: string;
+  startRound?: number;
+  initialRngState?: string;
+  initialFiredTriggers?: string[];
+  searchProvider?: SearchProvider | null;
   callbacks?: EngineCallbacks;
   signal?: AbortSignal;
   shouldStop?: () => boolean;
@@ -107,9 +111,12 @@ export async function runSimulation(opts: EngineOptions): Promise<EngineResult> 
   const t0 = Date.now();
   const numRounds = totalRounds(config);
   const runId = opts.runId ?? uuid();
+  const startRound = Math.max(0, opts.startRound ?? 0);
 
   // 1. Initialize
-  const rng = new SeedablePRNG(config.simulation.seed);
+  const rng = opts.initialRngState
+    ? SeedablePRNG.fromState(opts.initialRngState)
+    : new SeedablePRNG(config.simulation.seed);
   const graphRevisionId = store.computeGraphRevisionId();
 
   // Create or update run manifest
@@ -141,20 +148,27 @@ export async function runSimulation(opts: EngineOptions): Promise<EngineResult> 
   const embeddingProvider = config.feed.embeddingEnabled
     ? createEmbeddingProvider(config.feed)
     : null;
-  const searchProvider = config.search.enabled
-    ? createSearchProvider(config.search)
-    : null;
+  const searchProvider =
+    opts.searchProvider !== undefined
+      ? opts.searchProvider
+      : config.search.enabled
+        ? createSearchProvider(config.search)
+        : null;
 
   // Simulation start time (round 0 = 2024-01-01T00:00:00 in configured timezone)
   const startTime = new Date("2024-01-01T00:00:00");
-  let completedRounds = 0;
+  let completedRounds = startRound;
 
-  // Threshold triggers fire once and are remembered across rounds
-  const firedTriggers = new Set<string>();
+  // Threshold triggers fire once and are remembered across rounds.
+  const firedTriggers = new Set<string>(opts.initialFiredTriggers ?? []);
 
   try {
+    if (startRound === 0 && !store.getRunScaffold(runId)) {
+      store.saveRunScaffold(runId, store.captureRunScaffold(runId));
+    }
+
     // 2. Per-round loop
-    for (let roundNum = 0; roundNum < numRounds; roundNum++) {
+    for (let roundNum = startRound; roundNum < numRounds; roundNum++) {
       throwIfStopRequested({
         signal: opts.signal,
         shouldStop: opts.shouldStop,
@@ -313,6 +327,7 @@ export async function runSimulation(opts: EngineOptions): Promise<EngineResult> 
                   skippedRound.roundNum,
                   actorStates,
                   buildNarrativeSnapshotState(skippedRound.narratives),
+                  firedTriggers,
                   rng
                 );
               }
@@ -394,15 +409,16 @@ export async function runSimulation(opts: EngineOptions): Promise<EngineResult> 
         persistNarratives(store, updatedNarratives);
 
         for (const scheduled of scheduledActions) {
+          const normalizedDecision = normalizeDecisionForPlatform(
+            config,
+            scheduled.route.tier,
+            scheduled.decision
+          );
           const executable: ExecutableActorAction = {
             actor: scheduled.actor,
             actorTopics: scheduled.actorTopics,
             routeTier: scheduled.route.tier,
-            decision: normalizeDecisionForPlatform(
-              config,
-              scheduled.route.tier,
-              scheduled.decision
-            ),
+            decision: normalizedDecision,
             feed: scheduled.feed,
           };
 
@@ -430,6 +446,39 @@ export async function runSimulation(opts: EngineOptions): Promise<EngineResult> 
               feedSize: executable.feed.length,
             })
           );
+
+          const cachedDecision = scheduled.requestHash
+            ? store.getCachedDecisionMetadata(runId, scheduled.requestHash)
+            : null;
+          store.logDecisionTrace({
+            id: stableId("decision-trace", runId, scheduled.actor.id, String(roundNum)),
+            run_id: runId,
+            round_num: roundNum,
+            actor_id: scheduled.actor.id,
+            route_tier: scheduled.route.tier,
+            route_reason: scheduled.route.reason,
+            search_eligible: scheduled.searchEligible ? 1 : 0,
+            search_selected: scheduled.searchSelected ? 1 : 0,
+            search_queries: scheduled.searchQueries.length > 0 ? JSON.stringify(scheduled.searchQueries) : null,
+            search_request_ids:
+              scheduled.searchRequests.length > 0
+                ? JSON.stringify(scheduled.searchRequests.map((request) => request.id))
+                : null,
+            request_hash: scheduled.requestHash ?? null,
+            model_id: cachedDecision?.model_id ?? null,
+            prompt_version: cachedDecision?.prompt_version ?? null,
+            raw_decision: scheduled.requestHash
+              ? (cachedDecision?.parsed_decision ?? JSON.stringify(scheduled.decision))
+              : JSON.stringify(scheduled.decision),
+            normalized_decision: JSON.stringify(normalizedDecision),
+            final_action: executable.decision.action,
+            normalization_reason:
+              JSON.stringify(scheduled.decision) !== JSON.stringify(normalizedDecision)
+                ? normalizedDecision.reasoning ?? `Decision normalized for ${config.platform.name}`
+                : null,
+            tier_c_rule_reason:
+              scheduled.route.tier === "C" ? scheduled.decision.reasoning ?? null : null,
+          });
 
           for (const searchRequest of scheduled.searchRequests) {
             store.addSearchRequest(searchRequest);
@@ -521,6 +570,7 @@ export async function runSimulation(opts: EngineOptions): Promise<EngineResult> 
           roundNum,
           buildActorSnapshotState(store, runId),
           buildNarrativeSnapshotState(store.getNarrativesByRun(runId)),
+          firedTriggers,
           rng
         );
       }
@@ -543,6 +593,19 @@ export async function runSimulation(opts: EngineOptions): Promise<EngineResult> 
     };
   } catch (err) {
     if (err instanceof SimulationCancelledError) {
+      const latestSnapshot = store.getLatestSnapshot(runId);
+      const lastCompletedRound = completedRounds - 1;
+      if (lastCompletedRound >= 0 && latestSnapshot?.round_num !== lastCompletedRound) {
+        saveSnapshot(
+          store,
+          runId,
+          lastCompletedRound,
+          buildActorSnapshotState(store, runId),
+          buildNarrativeSnapshotState(store.getNarrativesByRun(runId)),
+          firedTriggers,
+          rng
+        );
+      }
       store.updateRun(runId, {
         status: "cancelled",
         finished_at: new Date().toISOString(),
@@ -564,6 +627,19 @@ export async function runSimulation(opts: EngineOptions): Promise<EngineResult> 
             .filter(Boolean)
             .join(": ")
         : String(err);
+    const latestSnapshot = store.getLatestSnapshot(runId);
+    const lastCompletedRound = completedRounds - 1;
+    if (lastCompletedRound >= 0 && latestSnapshot?.round_num !== lastCompletedRound) {
+      saveSnapshot(
+        store,
+        runId,
+        lastCompletedRound,
+        buildActorSnapshotState(store, runId),
+        buildNarrativeSnapshotState(store.getNarrativesByRun(runId)),
+        firedTriggers,
+        rng
+      );
+    }
     store.updateRun(runId, {
       status: "failed",
       finished_at: new Date().toISOString(),

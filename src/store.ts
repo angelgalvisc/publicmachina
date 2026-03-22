@@ -7,7 +7,7 @@
 
 import Database from "better-sqlite3";
 import { randomUUID, createHash } from "node:crypto";
-import { SCHEMA_SQL } from "./schema.js";
+import { CURRENT_SCHEMA_VERSION, SCHEMA_SQL } from "./schema.js";
 import type {
   DocumentRecord,
   Chunk,
@@ -46,6 +46,13 @@ import type {
   ActorContext,
   RunManifest,
   FeedItem,
+  DecisionTraceRow,
+  RunScaffoldData,
+  ActorTopicRow,
+  ActorBeliefRow,
+  CommunityRow,
+  CommunityOverlapRow,
+  PostTopicRow,
 } from "./types.js";
 
 // ═══════════════════════════════════════════════════════
@@ -191,6 +198,9 @@ export interface GraphStore {
     tierBCalls: number;
     tierCActions: number;
   };
+  getRunModelMetadata(
+    runId: string
+  ): { model_id: string; prompt_version: string } | null;
 
   // Decision cache
   cacheDecision(entry: {
@@ -212,6 +222,10 @@ export interface GraphStore {
     modelId: string,
     promptVersion: string
   ): { raw_response: string; parsed_decision: string } | null;
+  getCachedDecisionMetadata(
+    runId: string,
+    requestHash: string
+  ): { model_id: string; prompt_version: string; raw_response: string; parsed_decision: string } | null;
 
   // Snapshots
   saveSnapshot(snapshot: {
@@ -220,11 +234,16 @@ export interface GraphStore {
     round_num: number;
     actor_states: string;
     narrative_states: string;
+    fired_triggers?: string;
     rng_state: string;
   }): void;
   getLatestSnapshot(
     runId: string
-  ): { round_num: number; actor_states: string; narrative_states: string; rng_state: string } | null;
+  ): { round_num: number; actor_states: string; narrative_states: string; fired_triggers: string; rng_state: string } | null;
+  captureRunScaffold(runId: string): RunScaffoldData;
+  saveRunScaffold(runId: string, scaffold: RunScaffoldData): void;
+  getRunScaffold(runId: string): RunScaffoldData | null;
+  resetRunToScaffold(runId: string): void;
 
   // Telemetry
   logTelemetry(entry: {
@@ -240,6 +259,8 @@ export interface GraphStore {
     duration_ms?: number;
     provider?: string;
   }): void;
+  logDecisionTrace(entry: DecisionTraceRow): void;
+  listDecisionTraces(runId: string, actorId?: string, roundNum?: number): DecisionTraceRow[];
 
   // Rounds
   upsertRound(round: {
@@ -340,20 +361,111 @@ export class SQLiteGraphStore implements GraphStore {
 
     // Initialize schema
     this.db.exec(SCHEMA_SQL);
-    this.ensureOptionalColumns();
+    this.runMigrations();
   }
 
-  private ensureOptionalColumns(): void {
-    this.ensureColumn("posts", "post_kind", "ALTER TABLE posts ADD COLUMN post_kind TEXT DEFAULT 'post'");
-    this.ensureColumn("posts", "is_deleted", "ALTER TABLE posts ADD COLUMN is_deleted INTEGER DEFAULT 0");
-    this.ensureColumn("posts", "deleted_at", "ALTER TABLE posts ADD COLUMN deleted_at TEXT");
-    this.ensureColumn("posts", "moderation_status", "ALTER TABLE posts ADD COLUMN moderation_status TEXT DEFAULT 'none'");
+  private runMigrations(): void {
+    const currentVersion = this.getSchemaVersion();
+    const migrations: Array<{ version: number; apply: () => void }> = [
+      {
+        version: 1,
+        apply: () => {
+          this.ensureColumn(
+            "posts",
+            "post_kind",
+            "ALTER TABLE posts ADD COLUMN post_kind TEXT DEFAULT 'post'"
+          );
+          this.ensureColumn(
+            "posts",
+            "is_deleted",
+            "ALTER TABLE posts ADD COLUMN is_deleted INTEGER DEFAULT 0"
+          );
+          this.ensureColumn("posts", "deleted_at", "ALTER TABLE posts ADD COLUMN deleted_at TEXT");
+          this.ensureColumn(
+            "posts",
+            "moderation_status",
+            "ALTER TABLE posts ADD COLUMN moderation_status TEXT DEFAULT 'none'"
+          );
+        },
+      },
+      {
+        version: 2,
+        apply: () => {
+          this.ensureColumn(
+            "snapshots",
+            "fired_triggers",
+            "ALTER TABLE snapshots ADD COLUMN fired_triggers TEXT DEFAULT '[]'"
+          );
+        },
+      },
+      {
+        version: 3,
+        apply: () => {
+          this.db.exec(`
+            CREATE TABLE IF NOT EXISTS run_scaffolds (
+              run_id TEXT PRIMARY KEY,
+              scaffold_json TEXT NOT NULL,
+              created_at TEXT DEFAULT (datetime('now')),
+              FOREIGN KEY (run_id) REFERENCES run_manifest(id)
+            );
+
+            CREATE TABLE IF NOT EXISTS decision_traces (
+              id TEXT PRIMARY KEY,
+              run_id TEXT NOT NULL,
+              round_num INTEGER NOT NULL,
+              actor_id TEXT NOT NULL,
+              route_tier TEXT NOT NULL,
+              route_reason TEXT,
+              search_eligible INTEGER DEFAULT 0,
+              search_selected INTEGER DEFAULT 0,
+              search_queries TEXT,
+              search_request_ids TEXT,
+              request_hash TEXT,
+              model_id TEXT,
+              prompt_version TEXT,
+              raw_decision TEXT,
+              normalized_decision TEXT,
+              final_action TEXT,
+              normalization_reason TEXT,
+              tier_c_rule_reason TEXT,
+              created_at TEXT DEFAULT (datetime('now')),
+              FOREIGN KEY (run_id) REFERENCES run_manifest(id),
+              FOREIGN KEY (actor_id) REFERENCES actors(id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_decision_traces_run_round ON decision_traces(run_id, round_num);
+            CREATE INDEX IF NOT EXISTS idx_decision_traces_actor ON decision_traces(run_id, actor_id, round_num DESC);
+          `);
+        },
+      },
+    ];
+
+    for (const migration of migrations) {
+      if (migration.version <= currentVersion) continue;
+      this.db.transaction(() => {
+        migration.apply();
+        this.setSchemaVersion(migration.version);
+      })();
+    }
+
+    if (this.getSchemaVersion() < CURRENT_SCHEMA_VERSION) {
+      this.setSchemaVersion(CURRENT_SCHEMA_VERSION);
+    }
   }
 
   private ensureColumn(table: string, column: string, ddl: string): void {
     const rows = this.db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
     if (rows.some((row) => row.name === column)) return;
     this.db.exec(ddl);
+  }
+
+  private getSchemaVersion(): number {
+    const row = this.db.pragma("user_version", { simple: true });
+    return typeof row === "number" ? row : 0;
+  }
+
+  private setSchemaVersion(version: number): void {
+    this.db.pragma(`user_version = ${version}`);
   }
 
   // ─── Provenance ───
@@ -1609,6 +1721,26 @@ export class SQLiteGraphStore implements GraphStore {
     return row;
   }
 
+  getRunModelMetadata(
+    runId: string
+  ): { model_id: string; prompt_version: string } | null {
+    const row = this.db
+      .prepare(
+        `SELECT model_id, prompt_version
+         FROM decision_cache
+         WHERE run_id = ? AND actor_id != 'interview'
+         ORDER BY round_num ASC, id ASC
+         LIMIT 1`
+      )
+      .get(runId) as
+      | {
+          model_id: string;
+          prompt_version: string;
+        }
+      | undefined;
+    return row ?? null;
+  }
+
   // ─── Decision cache ───
 
   cacheDecision(entry: {
@@ -1665,6 +1797,29 @@ export class SQLiteGraphStore implements GraphStore {
     return row ?? null;
   }
 
+  getCachedDecisionMetadata(
+    runId: string,
+    requestHash: string
+  ): { model_id: string; prompt_version: string; raw_response: string; parsed_decision: string } | null {
+    const row = this.db
+      .prepare(
+        `SELECT model_id, prompt_version, raw_response, parsed_decision
+         FROM decision_cache
+         WHERE run_id = ? AND request_hash = ?
+         ORDER BY round_num DESC, id DESC
+         LIMIT 1`
+      )
+      .get(runId, requestHash) as
+      | {
+          model_id: string;
+          prompt_version: string;
+          raw_response: string;
+          parsed_decision: string;
+        }
+      | undefined;
+    return row ?? null;
+  }
+
   // ─── Snapshots ───
 
   saveSnapshot(snapshot: {
@@ -1673,12 +1828,13 @@ export class SQLiteGraphStore implements GraphStore {
     round_num: number;
     actor_states: string;
     narrative_states: string;
+    fired_triggers?: string;
     rng_state: string;
   }): void {
     this.db
       .prepare(
-        `INSERT INTO snapshots (id, run_id, round_num, actor_states, narrative_states, rng_state)
-         VALUES (?, ?, ?, ?, ?, ?)`
+        `INSERT INTO snapshots (id, run_id, round_num, actor_states, narrative_states, fired_triggers, rng_state)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         snapshot.id,
@@ -1686,6 +1842,7 @@ export class SQLiteGraphStore implements GraphStore {
         snapshot.round_num,
         snapshot.actor_states,
         snapshot.narrative_states,
+        snapshot.fired_triggers ?? "[]",
         snapshot.rng_state
       );
   }
@@ -1696,11 +1853,12 @@ export class SQLiteGraphStore implements GraphStore {
     round_num: number;
     actor_states: string;
     narrative_states: string;
+    fired_triggers: string;
     rng_state: string;
   } | null {
     const row = this.db
       .prepare(
-        `SELECT round_num, actor_states, narrative_states, rng_state
+        `SELECT round_num, actor_states, narrative_states, fired_triggers, rng_state
          FROM snapshots WHERE run_id = ? ORDER BY round_num DESC LIMIT 1`
       )
       .get(runId) as
@@ -1708,10 +1866,147 @@ export class SQLiteGraphStore implements GraphStore {
           round_num: number;
           actor_states: string;
           narrative_states: string;
+          fired_triggers: string;
           rng_state: string;
         }
       | undefined;
     return row ?? null;
+  }
+
+  captureRunScaffold(runId: string): RunScaffoldData {
+    const actors = this.getActorsByRun(runId);
+    const actorTopics = this.db
+      .prepare(
+        `SELECT at.actor_id, at.topic, at.weight
+         FROM actor_topics at
+         JOIN actors a ON a.id = at.actor_id
+         WHERE a.run_id = ?`
+      )
+      .all(runId) as ActorTopicRow[];
+    const actorBeliefs = this.db
+      .prepare(
+        `SELECT ab.actor_id, ab.topic, ab.sentiment, ab.round_updated
+         FROM actor_beliefs ab
+         JOIN actors a ON a.id = ab.actor_id
+         WHERE a.run_id = ?`
+      )
+      .all(runId) as ActorBeliefRow[];
+    const communities = this.db
+      .prepare(`SELECT * FROM communities WHERE run_id = ? ORDER BY id ASC`)
+      .all(runId) as CommunityRow[];
+    const communityOverlaps = this.db
+      .prepare(`SELECT * FROM community_overlap WHERE run_id = ? ORDER BY community_a, community_b`)
+      .all(runId) as CommunityOverlapRow[];
+    const follows = this.db
+      .prepare(`SELECT * FROM follows WHERE run_id = ? ORDER BY follower_id, following_id`)
+      .all(runId) as Follow[];
+    const posts = this.db
+      .prepare(`SELECT * FROM posts WHERE run_id = ? ORDER BY round_num ASC, id ASC`)
+      .all(runId) as Post[];
+    const postTopics = this.db
+      .prepare(
+        `SELECT pt.post_id, pt.topic
+         FROM post_topics pt
+         JOIN posts p ON p.id = pt.post_id
+         WHERE p.run_id = ?
+         ORDER BY pt.post_id, pt.topic`
+      )
+      .all(runId) as PostTopicRow[];
+
+    return {
+      actors,
+      actorTopics,
+      actorBeliefs,
+      communities,
+      communityOverlaps,
+      follows,
+      posts,
+      postTopics,
+    };
+  }
+
+  saveRunScaffold(runId: string, scaffold: RunScaffoldData): void {
+    this.db
+      .prepare(
+        `INSERT INTO run_scaffolds (run_id, scaffold_json)
+         VALUES (?, ?)
+         ON CONFLICT(run_id) DO UPDATE SET scaffold_json = excluded.scaffold_json,
+                                           created_at = datetime('now')`
+      )
+      .run(runId, JSON.stringify(scaffold));
+  }
+
+  getRunScaffold(runId: string): RunScaffoldData | null {
+    const row = this.db
+      .prepare(`SELECT scaffold_json FROM run_scaffolds WHERE run_id = ?`)
+      .get(runId) as { scaffold_json: string } | undefined;
+    if (!row) return null;
+    return JSON.parse(row.scaffold_json) as RunScaffoldData;
+  }
+
+  resetRunToScaffold(runId: string): void {
+    const scaffold = this.getRunScaffold(runId);
+    if (!scaffold) {
+      throw new Error(`No run scaffold recorded for run ${runId}.`);
+    }
+
+    this.executeInTransaction(() => {
+      this.db.prepare(`DELETE FROM decision_traces WHERE run_id = ?`).run(runId);
+      this.db.prepare(`DELETE FROM telemetry WHERE run_id = ?`).run(runId);
+      this.db.prepare(`DELETE FROM skipped_rounds WHERE run_id = ?`).run(runId);
+      this.db.prepare(`DELETE FROM search_requests WHERE run_id = ?`).run(runId);
+      this.db.prepare(`DELETE FROM rounds WHERE run_id = ?`).run(runId);
+      this.db.prepare(`DELETE FROM reports WHERE run_id = ?`).run(runId);
+      this.db.prepare(`DELETE FROM actor_memories WHERE run_id = ?`).run(runId);
+      this.db.prepare(`DELETE FROM exposures WHERE run_id = ?`).run(runId);
+      this.db.prepare(`DELETE FROM mutes WHERE run_id = ?`).run(runId);
+      this.db.prepare(`DELETE FROM blocks WHERE run_id = ?`).run(runId);
+      this.db.prepare(`DELETE FROM follows WHERE run_id = ?`).run(runId);
+      this.db.prepare(`DELETE FROM post_topics WHERE post_id IN (SELECT id FROM posts WHERE run_id = ?)`).run(runId);
+      this.db.prepare(`DELETE FROM posts WHERE run_id = ?`).run(runId);
+      this.db.prepare(`DELETE FROM community_overlap WHERE run_id = ?`).run(runId);
+      this.db.prepare(`DELETE FROM communities WHERE run_id = ?`).run(runId);
+      this.db.prepare(`DELETE FROM actor_topics WHERE actor_id IN (SELECT id FROM actors WHERE run_id = ?)`).run(runId);
+      this.db.prepare(`DELETE FROM actor_beliefs WHERE actor_id IN (SELECT id FROM actors WHERE run_id = ?)`).run(runId);
+      this.db.prepare(`DELETE FROM actors WHERE run_id = ?`).run(runId);
+      this.db.prepare(`DELETE FROM snapshots WHERE run_id = ?`).run(runId);
+
+      for (const actor of scaffold.actors) {
+        this.addActor(actor);
+      }
+      for (const topic of scaffold.actorTopics) {
+        this.addActorTopic(topic.actor_id, topic.topic, topic.weight);
+      }
+      for (const belief of scaffold.actorBeliefs) {
+        this.addActorBelief(
+          belief.actor_id,
+          belief.topic,
+          belief.sentiment,
+          belief.round_updated ?? undefined
+        );
+      }
+      for (const community of scaffold.communities) {
+        this.addCommunity(
+          community.id,
+          runId,
+          community.name,
+          community.description ?? undefined,
+          community.cohesion
+        );
+      }
+      for (const overlap of scaffold.communityOverlaps) {
+        this.addCommunityOverlap(overlap.community_a, overlap.community_b, runId, overlap.weight);
+      }
+      for (const follow of scaffold.follows) {
+        this.addFollow(follow);
+      }
+      for (const post of scaffold.posts) {
+        this.addPost(post);
+      }
+      for (const postTopic of scaffold.postTopics) {
+        this.addPostTopic(postTopic.post_id, postTopic.topic);
+      }
+    });
   }
 
   // ─── Telemetry ───
@@ -1748,6 +2043,75 @@ export class SQLiteGraphStore implements GraphStore {
         entry.duration_ms ?? null,
         entry.provider ?? null
       );
+  }
+
+  logDecisionTrace(entry: DecisionTraceRow): void {
+    this.db
+      .prepare(
+        `INSERT OR REPLACE INTO decision_traces (
+          id, run_id, round_num, actor_id, route_tier, route_reason,
+          search_eligible, search_selected, search_queries, search_request_ids,
+          request_hash, model_id, prompt_version, raw_decision, normalized_decision,
+          final_action, normalization_reason, tier_c_rule_reason
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(
+        entry.id,
+        entry.run_id,
+        entry.round_num,
+        entry.actor_id,
+        entry.route_tier,
+        entry.route_reason ?? null,
+        entry.search_eligible,
+        entry.search_selected,
+        entry.search_queries ?? null,
+        entry.search_request_ids ?? null,
+        entry.request_hash ?? null,
+        entry.model_id ?? null,
+        entry.prompt_version ?? null,
+        entry.raw_decision ?? null,
+        entry.normalized_decision ?? null,
+        entry.final_action ?? null,
+        entry.normalization_reason ?? null,
+        entry.tier_c_rule_reason ?? null
+      );
+  }
+
+  listDecisionTraces(runId: string, actorId?: string, roundNum?: number): DecisionTraceRow[] {
+    if (actorId && roundNum !== undefined) {
+      return this.db
+        .prepare(
+          `SELECT * FROM decision_traces
+           WHERE run_id = ? AND actor_id = ? AND round_num = ?
+           ORDER BY created_at ASC`
+        )
+        .all(runId, actorId, roundNum) as DecisionTraceRow[];
+    }
+    if (actorId) {
+      return this.db
+        .prepare(
+          `SELECT * FROM decision_traces
+           WHERE run_id = ? AND actor_id = ?
+           ORDER BY round_num DESC, created_at ASC`
+        )
+        .all(runId, actorId) as DecisionTraceRow[];
+    }
+    if (roundNum !== undefined) {
+      return this.db
+        .prepare(
+          `SELECT * FROM decision_traces
+           WHERE run_id = ? AND round_num = ?
+           ORDER BY created_at ASC`
+        )
+        .all(runId, roundNum) as DecisionTraceRow[];
+    }
+    return this.db
+      .prepare(
+        `SELECT * FROM decision_traces
+         WHERE run_id = ?
+         ORDER BY round_num DESC, created_at ASC`
+      )
+      .all(runId) as DecisionTraceRow[];
   }
 
   // ─── Rounds ───

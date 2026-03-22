@@ -207,6 +207,7 @@ export interface SnapshotData {
   roundNum: number;
   actorStates: Record<string, ActorStateSnapshot>;
   narrativeStates: NarrativeSnapshot[];
+  firedTriggers: string[];
   rngState: string;
 }
 
@@ -237,8 +238,15 @@ export function saveSnapshot(
   roundNum: number,
   actorStates: ActorStateSnapshot[],
   narrativeStates: NarrativeSnapshot[],
-  rng: SeedablePRNG
+  firedTriggersOrRng: Set<string> | SeedablePRNG,
+  maybeRng?: SeedablePRNG
 ): void {
+  const firedTriggers = maybeRng === undefined ? new Set<string>() : firedTriggersOrRng as Set<string>;
+  const rng = (maybeRng === undefined ? firedTriggersOrRng : maybeRng) as SeedablePRNG | undefined;
+  if (!rng) {
+    throw new Error("saveSnapshot requires a PRNG instance.");
+  }
+
   const actorMap: Record<string, ActorStateSnapshot> = {};
   for (const a of actorStates) {
     actorMap[a.id] = a;
@@ -255,6 +263,7 @@ export function saveSnapshot(
     round_num: roundNum,
     actor_states: JSON.stringify(actorMap),
     narrative_states: JSON.stringify(narrativeStates),
+    fired_triggers: JSON.stringify([...firedTriggers]),
     rng_state: rng.state(),
   });
 }
@@ -274,6 +283,7 @@ export function restoreSnapshot(
     roundNum: row.round_num,
     actorStates: JSON.parse(row.actor_states) as Record<string, ActorStateSnapshot>,
     narrativeStates: JSON.parse(row.narrative_states) as NarrativeSnapshot[],
+    firedTriggers: JSON.parse(row.fired_triggers ?? "[]") as string[],
     rngState: row.rng_state,
   };
 }

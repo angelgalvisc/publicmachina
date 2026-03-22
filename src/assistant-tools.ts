@@ -63,6 +63,7 @@ import {
 import { saveConfig } from "./config.js";
 import { formatSimulationPlan, validateSimulationSpec } from "./design.js";
 import { designCast } from "./cast-design.js";
+import { prepareGroundedRun } from "./grounding.js";
 import {
   acquireActiveRunLock,
   clearStopRequest,
@@ -127,6 +128,7 @@ export const ASSISTANT_TOOLS: AssistantToolDefinition[] = [
       configPath: "string? — explicit generated config path when not using the active design",
       docsPath: "string? — source documents path override when the active design should not be used as-is",
       confirmed: "boolean? — true only after the user has explicitly confirmed the run",
+      offline: "boolean? — true only when the user explicitly wants a non-grounded offline run",
     },
   },
   {
@@ -393,7 +395,9 @@ async function runSimulationTool(
   }
 
   const runConfig = loadConfig(configPath);
-  const estimate = estimatePipelineRun(runConfig);
+  const offline = booleanArg(args.offline) ?? false;
+  const preparedConfig = await prepareGroundedRun(runConfig, { offline });
+  const estimate = estimatePipelineRun(preparedConfig);
   if (wouldExceedSessionBudget(runtime, estimate.estimatedCostUsd ?? 0)) {
     return {
       status: "error",
@@ -410,6 +414,7 @@ async function runSimulationTool(
     dbPath,
     runId,
     historyRecordId: designed.historyRecordId,
+    offline,
     estimate,
   };
 
@@ -423,7 +428,9 @@ async function runSimulationTool(
         estimate.estimatedCostUsd !== null
           ? `Rough model cost estimate: ~$${estimate.estimatedCostUsd.toFixed(2)}.`
           : "Cost estimate unavailable for the current provider.",
-        estimate.searchEnabled ? "Internet-enabled agents are active in this config." : "Internet search is off in this config.",
+        estimate.searchEnabled
+          ? "Web grounding is active for this run."
+          : "Offline mode is active for this run.",
         "Reply yes to run it now, or no to keep the design without running.",
       ].join(" "),
       pendingRun,
@@ -482,7 +489,7 @@ async function runSimulationTool(
       costUsd: estimate.estimatedCostUsd ?? 0,
     }));
     const result = await executePipeline({
-      config: runConfig,
+      config: preparedConfig,
       dbPath,
       docsPath,
       runId,
@@ -967,6 +974,10 @@ function stringifyArg(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
+}
+
+function booleanArg(value: unknown): boolean | null {
+  return typeof value === "boolean" ? value : null;
 }
 
 async function materializeSourceDocs(

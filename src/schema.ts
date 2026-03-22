@@ -3,9 +3,13 @@
  *
  * Source of truth: PLAN.md §SQLite Schema
  *
- * Single exported constant: SCHEMA_SQL
+ * Exported constants:
+ * - CURRENT_SCHEMA_VERSION
+ * - SCHEMA_SQL
  * Used only by SQLiteGraphStore constructor.
  */
+
+export const CURRENT_SCHEMA_VERSION = 3;
 
 export const SCHEMA_SQL = `
 -- ═══════════════════════════════════════
@@ -491,8 +495,40 @@ CREATE TABLE IF NOT EXISTS snapshots (
   created_at TEXT DEFAULT (datetime('now')),
   actor_states TEXT NOT NULL,
   narrative_states TEXT NOT NULL,
+  fired_triggers TEXT NOT NULL DEFAULT '[]',
   rng_state TEXT NOT NULL,
   FOREIGN KEY (run_id) REFERENCES run_manifest(id)
+);
+
+CREATE TABLE IF NOT EXISTS run_scaffolds (
+  run_id TEXT PRIMARY KEY,
+  scaffold_json TEXT NOT NULL,
+  created_at TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY (run_id) REFERENCES run_manifest(id)
+);
+
+CREATE TABLE IF NOT EXISTS decision_traces (
+  id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL,
+  round_num INTEGER NOT NULL,
+  actor_id TEXT NOT NULL,
+  route_tier TEXT NOT NULL,
+  route_reason TEXT,
+  search_eligible INTEGER DEFAULT 0,
+  search_selected INTEGER DEFAULT 0,
+  search_queries TEXT,
+  search_request_ids TEXT,
+  request_hash TEXT,
+  model_id TEXT,
+  prompt_version TEXT,
+  raw_decision TEXT,
+  normalized_decision TEXT,
+  final_action TEXT,
+  normalization_reason TEXT,
+  tier_c_rule_reason TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY (run_id) REFERENCES run_manifest(id),
+  FOREIGN KEY (actor_id) REFERENCES actors(id)
 );
 
 -- ═══════════════════════════════════════
@@ -500,6 +536,8 @@ CREATE TABLE IF NOT EXISTS snapshots (
 -- ═══════════════════════════════════════
 
 CREATE INDEX IF NOT EXISTS idx_decision_cache_lookup ON decision_cache(request_hash, model_id, prompt_version);
+CREATE INDEX IF NOT EXISTS idx_decision_traces_run_round ON decision_traces(run_id, round_num);
+CREATE INDEX IF NOT EXISTS idx_decision_traces_actor ON decision_traces(run_id, actor_id, round_num DESC);
 CREATE INDEX IF NOT EXISTS idx_posts_run_round ON posts(run_id, round_num);
 CREATE INDEX IF NOT EXISTS idx_posts_author ON posts(author_id, run_id);
 CREATE INDEX IF NOT EXISTS idx_telemetry_run_round ON telemetry(run_id, round_num);
