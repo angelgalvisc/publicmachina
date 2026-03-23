@@ -102,6 +102,35 @@ export function applyStoreMigrations(db: Database.Database): void {
         );
       },
     },
+    {
+      version: 5,
+      apply: () => {
+        db.exec(`
+          CREATE TABLE IF NOT EXISTS temporal_memory_outbox (
+            id TEXT PRIMARY KEY,
+            run_id TEXT NOT NULL,
+            round_num INTEGER NOT NULL,
+            episode_type TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            created_at TEXT DEFAULT (datetime('now')),
+            synced_at TEXT,
+            sync_error TEXT,
+            FOREIGN KEY (run_id) REFERENCES run_manifest(id)
+          );
+
+          CREATE TABLE IF NOT EXISTS temporal_memory_sync_state (
+            run_id TEXT PRIMARY KEY,
+            last_synced_round INTEGER NOT NULL DEFAULT -1,
+            last_success_at TEXT,
+            last_error TEXT,
+            FOREIGN KEY (run_id) REFERENCES run_manifest(id)
+          );
+
+          CREATE INDEX IF NOT EXISTS idx_temporal_outbox_pending
+            ON temporal_memory_outbox(run_id, round_num, synced_at);
+        `);
+      },
+    },
   ];
 
   for (const migration of migrations) {

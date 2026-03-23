@@ -22,7 +22,9 @@ export type FeedAlgorithm =
   | "heuristic"
   | "trace-aware"
   | "embedding"
-  | "hybrid";
+  | "hybrid"
+  | "social-hybrid"
+  | "twhin-hybrid";
 
 export interface PlatformFeatures {
   upvoteDownvote: boolean;

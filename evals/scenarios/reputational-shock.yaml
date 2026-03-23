@@ -1,0 +1,84 @@
+# Eval Scenario: Reputational Shock
+# Tests: crisis response effectiveness, stakeholder divergence, narrative recovery
+
+id: reputational-shock
+name: "Major data breach at a consumer tech company"
+version: 1
+
+hypothesis: >
+  After a visible data breach, different stakeholder groups react on different
+  timescales and with different priorities. Customers focus on personal risk,
+  regulators on compliance failures, competitors on market opportunity, and
+  media on narrative drama. The company's response strategy determines whether
+  the narrative stabilizes or escalates.
+
+brief: >
+  SafeCloud (a fictional major cloud provider) suffers a data breach exposing
+  50 million user records including emails, passwords, and payment data.
+  The breach is first reported by a security researcher on Twitter, then
+  confirmed by the company 6 hours later. Simulate how customers, regulators,
+  competitors, security researchers, journalists, the company's PR team,
+  and investor analysts react over 48 hours.
+
+actors:
+  total: 30
+  tier_distribution:
+    A: 5
+    B: 15
+    C: 10
+  seed_archetypes:
+    - security_researcher
+    - affected_customer_individual
+    - affected_customer_enterprise
+    - data_privacy_regulator
+    - competitor_cloud_provider
+    - financial_journalist
+    - tech_journalist
+    - safecloud_pr_team
+    - investor_analyst_bullish
+    - investor_analyst_bearish
+    - privacy_advocate
+    - cybersecurity_consultant
+
+simulation:
+  totalHours: 48
+  minutesPerRound: 120
+  rounds: 24
+  seed: 512
+
+events:
+  - round: 0
+    content: "ALERT: Security researcher @whitehat publishes evidence of a massive data breach at SafeCloud. 'I've confirmed access to a database with 50M+ user records including hashed passwords and partial payment data. SafeCloud has not responded to my responsible disclosure from 2 weeks ago.'"
+    topics: ["breach", "security", "SafeCloud", "privacy"]
+  - round: 3
+    content: "OFFICIAL: SafeCloud confirms the breach in a blog post. 'We take security seriously. The vulnerability has been patched. We are notifying affected users and offering 2 years of free credit monitoring.' CEO apologizes in a video statement."
+    topics: ["breach", "response", "SafeCloud", "privacy"]
+  - round: 12
+    content: "DEVELOPMENT: EU Data Protection Authority opens formal investigation into SafeCloud's handling of the breach. 'The 2-week delay in disclosure may constitute a GDPR violation,' says the lead investigator."
+    topics: ["breach", "regulation", "GDPR", "SafeCloud"]
+
+expected_dynamics:
+  - type: stakeholder_divergence
+    description: "Customers, regulators, competitors, and media react with different priorities and timescales"
+  - type: crisis_escalation
+    description: "If company response is perceived as inadequate, narrative escalates rather than stabilizes"
+  - type: competitive_opportunism
+    description: "Competitor cloud providers position themselves as safer alternatives"
+  - type: trust_decay
+    description: "Initial customer anger may not be resolved by corporate response"
+
+topics:
+  - breach
+  - security
+  - privacy
+  - SafeCloud
+  - regulation
+  - GDPR
+  - trust
+
+evaluation_focus:
+  - stance_continuity
+  - narrative_coherence
+  - relation_continuity
+  - contradiction_rate
+  - cross_community_exposure

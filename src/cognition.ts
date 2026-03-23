@@ -63,6 +63,8 @@ export interface DecisionRequest {
   platform: string;
   simContext: string;
   webContext?: string;
+  /** Temporal memory context from Graphiti (Phase A4). Optional until retrieval is wired. */
+  temporalMemoryContext?: string;
 }
 
 export interface DecisionResponse {
@@ -494,6 +496,10 @@ function buildDecisionSystemPrompt(request: DecisionRequest): string {
     ? `\nWEB CONTEXT:\n${request.webContext}\n`
     : "";
 
+  const temporalMemorySection = request.temporalMemoryContext
+    ? `\nTEMPORAL MEMORY (your history, relationships, and how your positions have evolved):\n${request.temporalMemoryContext}\n`
+    : "";
+
   return `You are simulating a social media user on ${request.platform}.
 
 YOUR PERSONA:
@@ -510,8 +516,7 @@ ${Object.entries(request.actor.belief_state).map(([t, s]) => `  ${t}: ${s.toFixe
 
 INTERACTION CONTEXT:
 ${request.simContext}
-${webContextSection}
-
+${webContextSection}${temporalMemorySection}
 You must decide what to do next. Choose ONE action from the available actions.
 Respond with valid JSON only.`;
 }

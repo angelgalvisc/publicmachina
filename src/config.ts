@@ -36,6 +36,7 @@ export interface SimConfig {
   fatigue: FatigueConfig;
   events: EventConfig;
   output: OutputConfig;
+  temporalMemory: TemporalMemoryConfig;
 }
 
 export interface SimulationConfig {
@@ -82,6 +83,15 @@ export interface FeedConfig {
   embeddingWeight: number;
   embeddingModel: string;
   embeddingDimensions: number;
+  twhin: TwhinFeedConfig;
+}
+
+/** TwHIN-BERT social embedding configuration (Phase B) */
+export interface TwhinFeedConfig {
+  enabled: boolean;
+  model: string;
+  batchSize: number;
+  weight: number;
 }
 
 export interface SearchConfig {
@@ -148,6 +158,18 @@ export interface EventConfig {
 export interface OutputConfig {
   dir: string;
   format: "markdown" | "json" | "both";
+}
+
+/** TemporalMemoryConfig — controls the optional Graphiti temporal memory layer */
+export interface TemporalMemoryConfig {
+  enabled: boolean;
+  provider: "noop" | "graphiti";
+  graphitiEndpoint: string;
+  flushStrategy: "end-of-round";
+  contextBudget: {
+    tierA: { maxFacts: number; maxRelationships: number; maxContradictions: number };
+    tierB: { maxFacts: number; maxRelationships: number };
+  };
 }
 
 export interface AssistantConfig {
@@ -285,6 +307,12 @@ const DEFAULTS: SimConfig = {
     embeddingWeight: 0.25,
     embeddingModel: "hash-embedding-v1",
     embeddingDimensions: 32,
+    twhin: {
+      enabled: false,
+      model: "Twitter/twhin-bert-base",
+      batchSize: 64,
+      weight: 0.3,
+    },
   },
   propagation: {
     viralThreshold: 30,
@@ -315,6 +343,16 @@ const DEFAULTS: SimConfig = {
   output: {
     dir: "./output",
     format: "both",
+  },
+  temporalMemory: {
+    enabled: false,
+    provider: "noop",
+    graphitiEndpoint: "bolt://localhost:6379",
+    flushStrategy: "end-of-round",
+    contextBudget: {
+      tierA: { maxFacts: 10, maxRelationships: 5, maxContradictions: 3 },
+      tierB: { maxFacts: 3, maxRelationships: 2 },
+    },
   },
 };
 

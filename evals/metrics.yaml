@@ -1,0 +1,172 @@
+# PublicMachina Evaluation Metrics
+# Reference: PLAN_PRODUCT_EVOLUTION.md §5.4
+
+version: 1
+
+quality_metrics:
+
+  contradiction_rate:
+    id: contradiction_rate
+    name: "Contradiction Rate"
+    description: >
+      Fraction of actors who express contradictory stances on the same topic
+      within a run without an intervening event or new information that would
+      justify the change. Lower is better.
+    unit: ratio
+    direction: lower_is_better
+    computation: >
+      For each actor, compare belief_updated events. If stance on topic T
+      flips sign (positive → negative or vice versa) without a relevant
+      event_observed or post_created with new information between the two
+      updates, count as contradiction. Rate = contradictions / total belief updates.
+    baseline_target: "measure current"
+    improvement_target: ">=20% reduction"
+
+  stance_continuity:
+    id: stance_continuity
+    name: "Stance Continuity"
+    description: >
+      How consistently an actor maintains or gradually evolves their position
+      over the run. Measured as average cosine similarity between consecutive
+      belief state vectors per actor. Higher is better (unless events should
+      cause rapid change).
+    unit: score_0_to_1
+    direction: higher_is_better
+    computation: >
+      For each actor with beliefs at rounds R_i and R_{i+1}, compute cosine
+      similarity of the belief vector. Average across all actors and all
+      consecutive round pairs. Exclude rounds where an event directly
+      targets the actor.
+    baseline_target: "measure current"
+    improvement_target: ">=10% improvement"
+
+  relation_continuity:
+    id: relation_continuity
+    name: "Relation Continuity"
+    description: >
+      Stability of the social graph over time. Measures how often follow/block
+      relationships flip without justification. Lower flip rate is better.
+    unit: ratio
+    direction: lower_is_better
+    computation: >
+      Count follow→unfollow and unfollow→follow transitions per actor pair
+      within the run. Divide by total relationship events. Exclude flips
+      where a contradiction or event justifies the change.
+    baseline_target: "measure current"
+    improvement_target: ">=15% reduction in unjustified flips"
+
+  narrative_coherence:
+    id: narrative_coherence
+    name: "Narrative Coherence"
+    description: >
+      Whether the dominant narratives evolve logically through the run.
+      Measured via LLM-as-judge on the run report: does the narrative
+      arc make sense given the events and actor composition?
+    unit: score_1_to_5
+    direction: higher_is_better
+    computation: >
+      Generate run report. Submit to LLM-as-judge with rubric:
+      1=incoherent, 2=fragmented, 3=passable, 4=coherent, 5=compelling.
+      Average across 3 independent judge calls for stability.
+    baseline_target: "measure current"
+    improvement_target: ">=0.5 point improvement"
+
+  repetition_rate:
+    id: repetition_rate
+    name: "Repetition Rate"
+    description: >
+      Fraction of posts that are near-duplicates of the same actor's prior
+      posts. High repetition signals that memory or cognition is not working.
+    unit: ratio
+    direction: lower_is_better
+    computation: >
+      For each actor, compute pairwise similarity between all their posts
+      in the run. If similarity > 0.85, count as repetition. Rate =
+      repetitive pairs / total post pairs per actor, averaged.
+    baseline_target: "measure current"
+    improvement_target: ">=25% reduction"
+
+runtime_metrics:
+
+  wall_time_per_round:
+    id: wall_time_per_round
+    name: "Wall Time per Round"
+    description: "Average wall-clock time per round in milliseconds."
+    unit: ms
+    direction: lower_is_better
+    source: "rounds table → wall_time_ms"
+    regression_threshold: "<=20% increase from baseline"
+
+  added_latency_tier_ab:
+    id: added_latency_tier_ab
+    name: "Added Latency for Tier A/B"
+    description: "Additional latency introduced by temporal memory queries for Tier A/B actors."
+    unit: ms
+    direction: lower_is_better
+    source: "telemetry table → duration_ms delta between graphiti-enabled and baseline"
+    regression_threshold: "<=2000ms per actor per round"
+
+  token_usage:
+    id: token_usage
+    name: "Total Token Usage"
+    description: "Sum of tokens_input + tokens_output across all telemetry rows."
+    unit: tokens
+    direction: lower_is_better
+    source: "telemetry table → SUM(tokens_input + tokens_output)"
+    regression_threshold: "<=30% increase from baseline"
+
+  search_requests:
+    id: search_requests
+    name: "Search Requests"
+    description: "Total SearXNG search requests issued during the run."
+    unit: count
+    source: "search_requests table → COUNT(*)"
+
+  total_cost_estimate:
+    id: total_cost_estimate
+    name: "Estimated Total Cost"
+    description: "Sum of cost_usd across all telemetry rows."
+    unit: usd
+    direction: lower_is_better
+    source: "telemetry table → SUM(cost_usd)"
+    regression_threshold: "<=50% increase from baseline"
+
+output_utility_metrics:
+
+  interview_consistency:
+    id: interview_consistency
+    name: "Interview Consistency"
+    description: >
+      When an actor is interviewed about their actions, does the response
+      align with what they actually did in the simulation? Measured by
+      LLM-as-judge comparing interview answers to decision traces.
+    unit: score_1_to_5
+    direction: higher_is_better
+    computation: >
+      Interview 5 key actors with 3 questions each. Compare each answer
+      against the actor's actual decision traces and posts. LLM-as-judge
+      rates alignment: 1=contradicts record, 3=partially aligned, 5=fully consistent.
+
+  report_usefulness:
+    id: report_usefulness
+    name: "Report Usefulness"
+    description: >
+      Does the generated report provide actionable insights about the
+      simulation? Measured by LLM-as-judge evaluating the report.
+    unit: score_1_to_5
+    direction: higher_is_better
+
+comparison_methodology:
+  approach: "A/B comparison"
+  baseline_label: "current engine (SQLite memory, hybrid feed, current cast)"
+  variant_labels:
+    - "graphiti-enabled (Phase 5)"
+    - "twhin-hybrid feed (Phase 6)"
+    - "enriched cast (Phase 7)"
+  runs_per_comparison: 3
+  judge_calls_per_metric: 3
+  statistical_note: >
+    With 3 runs per variant and 5 scenarios, we get 15 data points per
+    comparison. Not enough for statistical significance, but sufficient
+    for directional confidence. If results are marginal, increase to 5
+    runs per variant.

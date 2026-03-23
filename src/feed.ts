@@ -297,6 +297,27 @@ function scoreByAlgorithm(opts: {
     score += traceScore(opts.actorId, opts.post, opts.source, opts.state, opts.config);
   }
 
+  // Social-hybrid and TwHIN-hybrid: combine all signals including social embeddings
+  // These algorithms use TwHIN-BERT embeddings (when available) as the primary
+  // social-representation signal, plus trace-aware scoring for behavioral context.
+  // Reference: PLAN_PRODUCT_EVOLUTION.md §6.4, §6.5
+  if (opts.config.algorithm === "social-hybrid" || opts.config.algorithm === "twhin-hybrid") {
+    // Social representation similarity (TwHIN or hash-based fallback)
+    const socialEmbeddingWeight = opts.config.twhin?.enabled
+      ? opts.config.twhin.weight
+      : opts.config.embeddingWeight;
+
+    if (opts.config.embeddingEnabled || opts.config.twhin?.enabled) {
+      score += embeddingSimilarity(opts.actorId, opts.post.id, opts.state) * socialEmbeddingWeight;
+    }
+
+    // Trace-aware signal (behavioral context)
+    score += traceScore(opts.actorId, opts.post, opts.source, opts.state, opts.config);
+
+    // Community affinity gets a stronger weight in social-hybrid
+    score += opts.affinity * 0.15;
+  }
+
   return score;
 }
 

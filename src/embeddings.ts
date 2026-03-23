@@ -43,6 +43,25 @@ export function createEmbeddingProvider(config: FeedConfig): EmbeddingProvider {
   return new HashEmbeddingProvider(config.embeddingModel, config.embeddingDimensions);
 }
 
+/**
+ * Create the appropriate embedding provider based on config.
+ * Async because TwHIN-BERT uses dynamic import.
+ * Falls back to HashEmbeddingProvider if TwHIN fails to load.
+ */
+export async function createEmbeddingProviderAsync(config: FeedConfig): Promise<EmbeddingProvider> {
+  if (config.twhin?.enabled) {
+    try {
+      const { createTwhinProvider } = await import("./embedding-twhin.js");
+      return createTwhinProvider(config.twhin.model, config.twhin.batchSize);
+    } catch {
+      console.warn(
+        "[embeddings] TwHIN enabled but embedding-twhin module failed to load. Falling back to hash embeddings."
+      );
+    }
+  }
+  return new HashEmbeddingProvider(config.embeddingModel, config.embeddingDimensions);
+}
+
 export async function attachEmbeddingsToPlatformState(opts: {
   state: PlatformState;
   store: GraphStore;

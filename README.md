@@ -203,7 +203,19 @@ The design layer uses LLM to propose actors and communities from the brief and s
 | [DEPLOYMENT.md](DEPLOYMENT.md) | Provider configuration, workspace policy, SearXNG setup, container notes |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Development workflow, testing, mocked vs real integration coverage |
 | [PLAN.md](PLAN.md) | Active roadmap and design decisions |
+| [PLAN_PRODUCT_EVOLUTION.md](PLAN_PRODUCT_EVOLUTION.md) | Product evolution roadmap: temporal memory, feed realism, cast enrichment |
+| [IMPLEMENTATION_CHECKLIST.md](IMPLEMENTATION_CHECKLIST.md) | Phase-by-phase implementation task list with parallelism analysis |
 | [IMPLEMENTATION_HISTORY.md](IMPLEMENTATION_HISTORY.md) | Historical milestones and implementation log |
+
+## Roadmap
+
+PublicMachina is actively evolving. The current engine already ships with grounded agents, replay/resume, 3-tier cognition, and a conversational operator. The next evolution focuses on three areas:
+
+- **Temporal memory** — agent memories that track validity windows, contradictions, and changing relationships over time, powered by a graph-based memory layer (Graphiti) alongside the existing SQLite ledger.
+- **Feed realism** — social-representation embeddings (TwHIN-BERT) as an additional ranking signal so each agent sees a personalized, more realistic feed instead of a uniform timeline.
+- **Cast enrichment** — stronger grounding of actor profiles and communities using source documents and graph-backed entity validation.
+
+All changes are gated behind formal evaluation: no new layer becomes default unless it measurably improves simulation quality without breaking cost or latency constraints. Full plan, architecture decisions, phases, risks, and success criteria live in [PLAN_PRODUCT_EVOLUTION.md](PLAN_PRODUCT_EVOLUTION.md).
 
 ## License
 

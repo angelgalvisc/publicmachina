@@ -44,6 +44,8 @@ import {
 } from "./search.js";
 import { getAllowedActionsForTier } from "./platform.js";
 import { mapWithConcurrency } from "./concurrency.js";
+import type { TemporalMemoryProvider } from "./temporal-memory.js";
+import { retrieveTemporalContext } from "./temporal-memory-retrieval.js";
 
 export interface ScheduledActorAction {
   index: number;
@@ -86,6 +88,7 @@ export interface RoundSchedulerOptions {
   actorBeliefsMap: Map<string, Record<string, number>>;
   lookbackRounds?: number;
   searchProvider?: SearchProvider | null;
+  temporalMemoryProvider?: TemporalMemoryProvider | null;
 }
 
 export async function scheduleRoundActions(
@@ -249,6 +252,25 @@ async function resolveBackendDecision(
       opts.config.search.cutoffDate,
       executions
     );
+  }
+
+  // Temporal memory retrieval (Phase A4) — enrich context for Tier A/B
+  if (
+    opts.temporalMemoryProvider &&
+    opts.config.temporalMemory.enabled &&
+    (job.route.tier === "A" || job.route.tier === "B")
+  ) {
+    const tmResult = await retrieveTemporalContext(
+      opts.temporalMemoryProvider,
+      opts.runId,
+      job.actor.id,
+      job.actorTopics,
+      job.route.tier,
+      opts.config.temporalMemory
+    );
+    if (tmResult.text) {
+      request = { ...request, temporalMemoryContext: tmResult.text };
+    }
   }
 
   return {

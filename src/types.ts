@@ -604,3 +604,51 @@ export interface RunScaffoldData {
   posts: Post[];
   postTopics: PostTopicRow[];
 }
+
+// ═══════════════════════════════════════════════════════
+// TEMPORAL MEMORY — Episode types for Graphiti integration
+// Reference: PLAN_PRODUCT_EVOLUTION.md §4.5
+// ═══════════════════════════════════════════════════════
+
+export type TemporalEpisodeType =
+  | "event_observed"
+  | "opinion_expressed"
+  | "post_created"
+  | "comment_created"
+  | "repost_created"
+  | "follow_changed"
+  | "mute_changed"
+  | "block_changed"
+  | "belief_updated"
+  | "narrative_shift";
+
+export interface TemporalEpisode {
+  id: string;
+  run_id: string;
+  round_num: number;
+  episode_type: TemporalEpisodeType;
+  actor_id: string;
+  target_actor_id?: string;
+  topic?: string;
+  content: string;
+  metadata?: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface TemporalMemoryOutboxRow {
+  id: string;
+  run_id: string;
+  round_num: number;
+  episode_type: TemporalEpisodeType;
+  payload_json: string;
+  created_at: string;
+  synced_at: string | null;
+  sync_error: string | null;
+}
+
+export interface TemporalMemorySyncState {
+  run_id: string;
+  last_synced_round: number;
+  last_success_at: string | null;
+  last_error: string | null;
+}

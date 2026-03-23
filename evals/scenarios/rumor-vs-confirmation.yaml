@@ -1,0 +1,72 @@
+# Eval Scenario: Rumor vs Confirmation
+# Tests: misinformation dynamics, correction effectiveness, trust decay
+
+id: rumor-vs-confirmation
+name: "False acquisition rumor spreads, then gets denied"
+version: 1
+
+hypothesis: >
+  A false rumor spreads faster than its correction. Agents who amplify the
+  rumor early face a credibility cost when the denial arrives. The correction
+  never fully reaches the same audience as the original rumor (truth deficit).
+
+brief: >
+  An anonymous account posts that BigBank is acquiring CryptoExchange for $5B.
+  The rumor spreads through financial Twitter. 8 hours later, both companies
+  officially deny the acquisition. Simulate how traders, journalists,
+  crypto influencers, and institutional analysts handle the rumor lifecycle.
+
+actors:
+  total: 30
+  tier_distribution:
+    A: 5
+    B: 15
+    C: 10
+  seed_archetypes:
+    - anonymous_leaker
+    - crypto_influencer_large
+    - crypto_influencer_small
+    - financial_journalist_credible
+    - financial_journalist_tabloid
+    - institutional_analyst
+    - retail_crypto_trader
+    - bigbank_spokesperson
+    - cryptoexchange_spokesperson
+
+simulation:
+  totalHours: 24
+  minutesPerRound: 60
+  rounds: 24
+  seed: 256
+
+events:
+  - round: 0
+    content: "UNVERIFIED: Anonymous source claims BigBank in advanced talks to acquire CryptoExchange for $5 billion. Deal could close within weeks."
+    topics: ["acquisition", "crypto", "banking", "rumor"]
+  - round: 8
+    content: "OFFICIAL: BigBank spokesperson states 'We are not in acquisition talks with CryptoExchange or any crypto platform. This rumor is unfounded.' CryptoExchange CEO confirms: 'We are not for sale.'"
+    topics: ["acquisition", "denial", "crypto", "banking"]
+
+expected_dynamics:
+  - type: rumor_cascade
+    description: "Rumor amplifies through influencers and tabloid journalists before credible sources verify"
+  - type: correction_lag
+    description: "Denial at round 8 doesn't reach all actors who saw the rumor"
+  - type: credibility_damage
+    description: "Actors who amplified the rumor face trust reduction"
+  - type: truth_deficit
+    description: "Some actors continue believing/acting on the rumor after denial"
+
+topics:
+  - acquisition
+  - crypto
+  - banking
+  - rumor
+  - misinformation
+  - credibility
+
+evaluation_focus:
+  - contradiction_rate
+  - stance_continuity
+  - narrative_coherence
+  - repetition_rate

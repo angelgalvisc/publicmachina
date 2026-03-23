@@ -1,0 +1,72 @@
+# Eval Scenario: Earnings Surprise + Market Structure
+# Tests: information asymmetry, analyst credibility, sentiment reversal
+
+id: earnings-market-structure
+name: "Major tech company misses earnings, triggers sector rotation"
+version: 1
+
+hypothesis: >
+  When a dominant tech company misses earnings expectations, sell-side analysts
+  who were bullish face credibility pressure. The narrative shifts from
+  "buy the dip" to "sector rotation" depending on how institutional voices react.
+
+brief: >
+  MegaCorp (a fictional top-5 tech company) reports Q4 earnings 15% below
+  consensus. The stock drops 8% after-hours. Simulate how the financial
+  community reacts: sell-side analysts, buy-side portfolio managers, financial
+  journalists, retail traders, competing company executives, and market
+  structure commentators.
+
+actors:
+  total: 25
+  tier_distribution:
+    A: 4
+    B: 12
+    C: 9
+  seed_archetypes:
+    - sellside_analyst_bullish
+    - sellside_analyst_bearish
+    - buyside_portfolio_manager
+    - financial_journalist
+    - retail_trader_long
+    - retail_trader_short
+    - competing_company_exec
+    - market_structure_commentator
+
+simulation:
+  totalHours: 48
+  minutesPerRound: 120
+  rounds: 24
+  seed: 123
+
+events:
+  - round: 0
+    content: "BREAKING: MegaCorp reports Q4 revenue $18.2B vs $21.5B expected. EPS $0.82 vs $1.15 consensus. Stock down 8% after-hours. CEO cites 'macro headwinds and delayed enterprise contracts.'"
+    topics: ["earnings", "tech", "markets", "MegaCorp"]
+  - round: 6
+    content: "UPDATE: Three major sell-side firms downgrade MegaCorp to Hold. Goldman maintains Buy, calling it 'an overreaction to a single quarter.'"
+    topics: ["earnings", "analyst", "downgrade", "MegaCorp"]
+
+expected_dynamics:
+  - type: credibility_shift
+    description: "Bullish analysts face backlash, bearish analysts gain credibility"
+  - type: narrative_competition
+    description: "'Buy the dip' vs 'sector rotation' narratives compete for dominance"
+  - type: sentiment_reversal
+    description: "Initially bullish retail traders may flip sentiment after analyst downgrades"
+  - type: information_asymmetry
+    description: "Institutional voices react to data, retail reacts to institutional voices"
+
+topics:
+  - earnings
+  - tech
+  - markets
+  - sector_rotation
+  - analyst_credibility
+  - MegaCorp
+
+evaluation_focus:
+  - stance_continuity
+  - narrative_coherence
+  - repetition_rate
+  - relation_continuity

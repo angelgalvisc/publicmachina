@@ -1,0 +1,73 @@
+# Eval Scenario: Policy / Tariff Shock
+# Tests: second-order effects, cross-domain spillover, institutional response time
+
+id: policy-tariff-shock
+name: "Sudden semiconductor tariff destabilizes supply chains"
+version: 1
+
+hypothesis: >
+  A sudden tariff on semiconductor imports creates cascading reactions across
+  industries. The initial reaction is sector-specific (chip companies), but
+  second-order effects (auto, consumer electronics, defense) emerge over
+  subsequent rounds as actors search for and find real-world precedent.
+
+brief: >
+  The government announces a 35% tariff on all semiconductor imports effective
+  in 30 days. Simulate how chip manufacturers, automakers, consumer electronics
+  companies, defense contractors, trade lobbyists, policy journalists, and
+  elected officials react over 72 hours.
+
+actors:
+  total: 35
+  tier_distribution:
+    A: 6
+    B: 16
+    C: 13
+  seed_archetypes:
+    - chip_manufacturer_exec
+    - automaker_supply_chain
+    - consumer_electronics_company
+    - defense_contractor
+    - trade_lobbyist_pro_tariff
+    - trade_lobbyist_anti_tariff
+    - policy_journalist
+    - elected_official_committee
+    - semiconductor_analyst
+
+simulation:
+  totalHours: 72
+  minutesPerRound: 180
+  rounds: 24
+  seed: 77
+
+events:
+  - round: 0
+    content: "BREAKING: President signs executive order imposing 35% tariff on all semiconductor imports, effective in 30 days. 'We must secure domestic chip production,' the statement reads."
+    topics: ["tariff", "semiconductors", "trade", "policy"]
+  - round: 8
+    content: "Industry coalition led by major automakers files emergency petition challenging the tariff timeline. 'A 30-day window is not enough to restructure supply chains that took decades to build.'"
+    topics: ["tariff", "auto", "supply_chain", "legal"]
+
+expected_dynamics:
+  - type: second_order_effects
+    description: "Initial chip-sector reaction expands to auto, electronics, defense"
+  - type: coalition_formation
+    description: "Pro-tariff and anti-tariff coalitions form across industries"
+  - type: institutional_lag
+    description: "Officials react slower than industry, journalists bridge the gap"
+  - type: narrative_displacement
+    description: "'National security' narrative competes with 'economic harm' narrative"
+
+topics:
+  - tariff
+  - semiconductors
+  - trade
+  - supply_chain
+  - policy
+  - national_security
+
+evaluation_focus:
+  - narrative_coherence
+  - relation_continuity
+  - cross_community_exposure
+  - stance_continuity

@@ -9,7 +9,7 @@
  * Used only by SQLiteGraphStore constructor.
  */
 
-export const CURRENT_SCHEMA_VERSION = 4;
+export const CURRENT_SCHEMA_VERSION = 5;
 
 export const SCHEMA_SQL = `
 -- ═══════════════════════════════════════
@@ -564,4 +564,30 @@ CREATE INDEX IF NOT EXISTS idx_actor_interest_embeddings_model ON actor_interest
 CREATE INDEX IF NOT EXISTS idx_search_cache_lookup ON search_cache(query, cutoff_date, language, categories);
 CREATE INDEX IF NOT EXISTS idx_search_requests_actor_round ON search_requests(run_id, actor_id, round_num DESC);
 CREATE INDEX IF NOT EXISTS idx_skipped_rounds_run_range ON skipped_rounds(run_id, from_round, to_round);
+
+-- ═══════════════════════════════════════
+-- TEMPORAL MEMORY OUTBOX (Phase A2)
+-- ═══════════════════════════════════════
+
+CREATE TABLE IF NOT EXISTS temporal_memory_outbox (
+  id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL,
+  round_num INTEGER NOT NULL,
+  episode_type TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  created_at TEXT DEFAULT (datetime('now')),
+  synced_at TEXT,
+  sync_error TEXT,
+  FOREIGN KEY (run_id) REFERENCES run_manifest(id)
+);
+
+CREATE TABLE IF NOT EXISTS temporal_memory_sync_state (
+  run_id TEXT PRIMARY KEY,
+  last_synced_round INTEGER NOT NULL DEFAULT -1,
+  last_success_at TEXT,
+  last_error TEXT,
+  FOREIGN KEY (run_id) REFERENCES run_manifest(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_temporal_outbox_pending ON temporal_memory_outbox(run_id, round_num, synced_at);
 `;

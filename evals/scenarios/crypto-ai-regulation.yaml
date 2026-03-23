@@ -1,0 +1,70 @@
+# Eval Scenario: Crypto + AI Regulation
+# Tests: narrative polarization, information cascades, stance shifts under breaking news
+
+id: crypto-ai-regulation
+name: "SEC announces joint AI-crypto regulatory framework"
+version: 1
+
+hypothesis: >
+  When a major regulatory announcement hits crypto and AI simultaneously,
+  traders, analysts, and regulators will form polarized clusters faster
+  than in a single-domain shock. Journalists bridge communities.
+
+brief: >
+  The SEC publishes a joint framework regulating AI-assisted trading and
+  crypto custody. This affects both the crypto community and the AI industry.
+  Simulate how crypto traders, AI researchers, financial journalists,
+  regulators, and retail investors react over 24 hours.
+
+actors:
+  total: 30
+  tier_distribution:
+    A: 5
+    B: 15
+    C: 10
+  seed_archetypes:
+    - crypto_trader_bullish
+    - crypto_trader_bearish
+    - ai_researcher
+    - financial_journalist
+    - sec_regulator
+    - retail_investor
+    - crypto_influencer
+    - fintech_founder
+
+simulation:
+  totalHours: 24
+  minutesPerRound: 60
+  rounds: 24
+  seed: 42
+
+events:
+  - round: 0
+    content: "BREAKING: SEC publishes joint AI-crypto regulatory framework requiring KYC for AI trading bots and mandatory audits for crypto custody platforms."
+    topics: ["crypto", "AI", "regulation", "SEC"]
+
+expected_dynamics:
+  - type: polarization
+    description: "Crypto traders split into compliance-positive and anti-regulation camps"
+  - type: information_cascade
+    description: "Journalists publish initial coverage, then traders react to the coverage"
+  - type: stance_shift
+    description: "Some initially neutral actors shift stance after seeing community consensus"
+  - type: echo_chamber
+    description: "Bullish and bearish crypto communities reinforce internal narratives"
+
+topics:
+  - crypto
+  - AI
+  - regulation
+  - SEC
+  - trading
+  - compliance
+  - custody
+
+evaluation_focus:
+  - contradiction_rate
+  - stance_continuity
+  - echo_chamber_formation
+  - cross_community_exposure
+  - narrative_coherence

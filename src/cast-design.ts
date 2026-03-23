@@ -23,6 +23,28 @@ export interface CastDesignInput {
   spec: Pick<SimulationSpec, "title" | "objective" | "hypothesis" | "focusActors">;
   /** First ~500 chars of each downloaded source document */
   sourceDocSummaries: string[];
+  /** Enriched source summaries with structured metadata (Phase C1) */
+  enrichedSources?: EnrichedSourceSummary[];
+}
+
+/**
+ * Structured source document summary for grounding cast design.
+ * Reference: PLAN_PRODUCT_EVOLUTION.md §7.4 C1
+ *
+ * Each actor in the cast should ideally have at least 3 verifiable
+ * facts from these sources, not just generic personality traits.
+ */
+export interface EnrichedSourceSummary {
+  /** Document title */
+  title: string;
+  /** Source URL or file path */
+  sourceUrl: string;
+  /** Clean summary (2-3 sentences) */
+  summary: string;
+  /** Named entities mentioned in the document */
+  namedEntities: string[];
+  /** Central claims or facts from the document */
+  centralClaims: string[];
 }
 
 interface CastDesignDraft {
@@ -67,11 +89,30 @@ export async function designCast(
   llm: LLMClient,
   input: CastDesignInput
 ): Promise<CastDesign> {
-  const { spec, sourceDocSummaries } = input;
+  const { spec, sourceDocSummaries, enrichedSources } = input;
 
-  const docContext = sourceDocSummaries.length > 0
-    ? sourceDocSummaries.map((s, i) => `Source ${i + 1}:\n${s}`).join("\n\n")
-    : "No source documents available.";
+  // Use enriched sources (Phase C1) when available, fall back to plain summaries
+  const docContext = enrichedSources && enrichedSources.length > 0
+    ? enrichedSources
+        .map((s, i) => {
+          const entities = s.namedEntities.length > 0
+            ? `Key entities: ${s.namedEntities.join(", ")}`
+            : "";
+          const claims = s.centralClaims.length > 0
+            ? `Central claims:\n${s.centralClaims.map((c) => `  - ${c}`).join("\n")}`
+            : "";
+          return [
+            `Source ${i + 1}: ${s.title}`,
+            `URL: ${s.sourceUrl}`,
+            `Summary: ${s.summary}`,
+            entities,
+            claims,
+          ].filter(Boolean).join("\n");
+        })
+        .join("\n\n")
+    : sourceDocSummaries.length > 0
+      ? sourceDocSummaries.map((s, i) => `Source ${i + 1}:\n${s}`).join("\n\n")
+      : "No source documents available.";
 
   const prompt = [
     `Simulation: ${spec.title}`,

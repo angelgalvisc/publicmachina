@@ -54,6 +54,7 @@ import type {
   CommunityRow,
   CommunityOverlapRow,
   PostTopicRow,
+  TemporalMemoryOutboxRow,
 } from "./types.js";
 
 // ═══════════════════════════════════════════════════════
@@ -340,6 +341,13 @@ export interface GraphStore {
 
   // Transaction boundary for batched engine commits
   executeInTransaction<T>(fn: () => T): T;
+
+  // Temporal memory outbox (Phase A2/A3)
+  insertOutboxEpisode(row: TemporalMemoryOutboxRow): void;
+  getPendingOutboxEpisodes(runId: string, roundNum: number): TemporalMemoryOutboxRow[];
+  markOutboxSynced(ids: string[]): void;
+  markOutboxError(ids: string[], error: string): void;
+  upsertSyncState(runId: string, roundNum: number, error?: string): void;
 
   // Utility
   close(): void;
@@ -2412,6 +2420,74 @@ export class SQLiteGraphStore implements GraphStore {
 
   executeInTransaction<T>(fn: () => T): T {
     return this.db.transaction(fn)();
+  }
+
+  // ─── Temporal Memory Outbox ───
+
+  insertOutboxEpisode(row: TemporalMemoryOutboxRow): void {
+    this.db
+      .prepare(
+        `INSERT OR IGNORE INTO temporal_memory_outbox
+         (id, run_id, round_num, episode_type, payload_json, created_at, synced_at, sync_error)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(
+        row.id,
+        row.run_id,
+        row.round_num,
+        row.episode_type,
+        row.payload_json,
+        row.created_at,
+        row.synced_at,
+        row.sync_error
+      );
+  }
+
+  getPendingOutboxEpisodes(runId: string, roundNum: number): TemporalMemoryOutboxRow[] {
+    return this.db
+      .prepare(
+        `SELECT * FROM temporal_memory_outbox
+         WHERE run_id = ? AND round_num = ? AND synced_at IS NULL
+         ORDER BY created_at ASC`
+      )
+      .all(runId, roundNum) as TemporalMemoryOutboxRow[];
+  }
+
+  markOutboxSynced(ids: string[]): void {
+    if (ids.length === 0) return;
+    const placeholders = ids.map(() => "?").join(",");
+    this.db
+      .prepare(
+        `UPDATE temporal_memory_outbox
+         SET synced_at = datetime('now'), sync_error = NULL
+         WHERE id IN (${placeholders})`
+      )
+      .run(...ids);
+  }
+
+  markOutboxError(ids: string[], error: string): void {
+    if (ids.length === 0) return;
+    const placeholders = ids.map(() => "?").join(",");
+    this.db
+      .prepare(
+        `UPDATE temporal_memory_outbox
+         SET sync_error = ?
+         WHERE id IN (${placeholders})`
+      )
+      .run(error, ...ids);
+  }
+
+  upsertSyncState(runId: string, roundNum: number, error?: string): void {
+    this.db
+      .prepare(
+        `INSERT INTO temporal_memory_sync_state (run_id, last_synced_round, last_success_at, last_error)
+         VALUES (?, ?, datetime('now'), ?)
+         ON CONFLICT(run_id) DO UPDATE SET
+           last_synced_round = excluded.last_synced_round,
+           last_success_at = CASE WHEN excluded.last_error IS NULL THEN datetime('now') ELSE last_success_at END,
+           last_error = excluded.last_error`
+      )
+      .run(runId, roundNum, error ?? null);
   }
 
   // ─── Utility ───

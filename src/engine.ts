@@ -37,8 +37,14 @@ import { persistActorMemories } from "./memory.js";
 import {
   attachEmbeddingsToPlatformState,
   createEmbeddingProvider,
+  createEmbeddingProviderAsync,
 } from "./embeddings.js";
 import { createSearchProvider, type SearchProvider } from "./search.js";
+import {
+  createTemporalMemoryProvider,
+  type TemporalMemoryProvider,
+} from "./temporal-memory.js";
+import { deriveTemporalEpisodes, flushOutboxToProvider } from "./temporal-memory-mapper.js";
 import { applyAutomaticModeration } from "./moderation.js";
 import {
   getAllowedActionsForTier,
@@ -89,6 +95,7 @@ export interface EngineOptions {
   initialRngState?: string;
   initialFiredTriggers?: string[];
   searchProvider?: SearchProvider | null;
+  temporalMemoryProvider?: TemporalMemoryProvider | null;
   callbacks?: EngineCallbacks;
   signal?: AbortSignal;
   shouldStop?: () => boolean;
@@ -145,15 +152,22 @@ export async function runSimulation(opts: EngineOptions): Promise<EngineResult> 
 
   const allActors = store.getActorsByRun(runId);
   const activationConfig = deriveActivationConfig(config);
-  const embeddingProvider = config.feed.embeddingEnabled
-    ? createEmbeddingProvider(config.feed)
-    : null;
+  const embeddingProvider =
+    config.feed.embeddingEnabled || config.feed.twhin?.enabled
+      ? await createEmbeddingProviderAsync(config.feed)
+      : null;
   const searchProvider =
     opts.searchProvider !== undefined
       ? opts.searchProvider
       : config.search.enabled
         ? createSearchProvider(config.search)
         : null;
+
+  // Temporal memory provider (Graphiti or Noop)
+  const temporalMemoryProvider =
+    opts.temporalMemoryProvider !== undefined
+      ? opts.temporalMemoryProvider
+      : await createTemporalMemoryProvider(config.temporalMemory);
 
   // Simulation start time (round 0 = 2024-01-01T00:00:00 in configured timezone)
   const startTime = new Date("2024-01-01T00:00:00");
@@ -390,6 +404,7 @@ export async function runSimulation(opts: EngineOptions): Promise<EngineResult> 
         actorTopicsMap,
         actorBeliefsMap,
         searchProvider,
+        temporalMemoryProvider,
       });
 
       throwIfStopRequested({
@@ -493,6 +508,19 @@ export async function runSimulation(opts: EngineOptions): Promise<EngineResult> 
           updatedNarratives
         );
 
+        // Temporal memory: derive episodes and write to outbox (separate from flat memory)
+        // Reference: PLAN_PRODUCT_EVOLUTION.md §4.6 — keep these as separate steps
+        if (temporalMemoryProvider) {
+          deriveTemporalEpisodes(
+            store,
+            runId,
+            roundNum,
+            scheduledActions,
+            activeEvents,
+            updatedNarratives
+          );
+        }
+
         const moderationDecisions = applyAutomaticModeration(
           store,
           runId,
@@ -554,6 +582,12 @@ export async function runSimulation(opts: EngineOptions): Promise<EngineResult> 
           wallTimeMs: roundWallTimeMs,
         });
       });
+
+      // Temporal memory: flush outbox to Graphiti (async, outside SQLite transaction)
+      // Failures are logged but do not stop the simulation.
+      if (temporalMemoryProvider) {
+        await flushOutboxToProvider(store, runId, roundNum, temporalMemoryProvider);
+      }
 
       completedRounds = roundNum + 1;
 
