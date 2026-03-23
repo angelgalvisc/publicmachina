@@ -628,6 +628,7 @@ export interface TemporalEpisode {
   round_num: number;
   episode_type: TemporalEpisodeType;
   actor_id: string;
+  actor_name?: string;
   target_actor_id?: string;
   topic?: string;
   content: string;

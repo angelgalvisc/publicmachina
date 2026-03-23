@@ -148,6 +148,7 @@ function mapActionToEpisodes(
   const episodes: TemporalEpisode[] = [];
   const d = action.decision;
   const actorId = action.actor.id;
+  const actorName = action.actor.name;
 
   switch (d.action) {
     case "post":
@@ -157,6 +158,7 @@ function mapActionToEpisodes(
         round_num: roundNum,
         episode_type: "post_created",
         actor_id: actorId,
+        actor_name: actorName,
         content: truncate(d.content ?? "", 300),
         topic: action.actorTopics[0],
         metadata: { reasoning: d.reasoning },
@@ -170,6 +172,7 @@ function mapActionToEpisodes(
           round_num: roundNum,
           episode_type: "opinion_expressed",
           actor_id: actorId,
+          actor_name: actorName,
           content: `Expressed opinion via post: ${truncate(d.content, 150)}`,
           topic: action.actorTopics[0],
           metadata: { reasoning: d.reasoning, via: "post" },
@@ -185,12 +188,29 @@ function mapActionToEpisodes(
         round_num: roundNum,
         episode_type: "comment_created",
         actor_id: actorId,
+        actor_name: actorName,
         target_actor_id: d.target,
         content: truncate(d.content ?? "", 300),
         topic: action.actorTopics[0],
         metadata: { reasoning: d.reasoning, targetPost: d.target },
         created_at: timestamp,
       });
+      // Comments expressing opinions also generate opinion_expressed
+      if (d.content && d.reasoning) {
+        episodes.push({
+          id: randomUUID(),
+          run_id: runId,
+          round_num: roundNum,
+          episode_type: "opinion_expressed",
+          actor_id: actorId,
+          actor_name: actorName,
+          target_actor_id: d.target,
+          content: `Expressed opinion via comment: ${truncate(d.content, 150)}`,
+          topic: action.actorTopics[0],
+          metadata: { reasoning: d.reasoning, via: "comment" },
+          created_at: timestamp,
+        });
+      }
       break;
 
     case "repost":
@@ -200,6 +220,7 @@ function mapActionToEpisodes(
         round_num: roundNum,
         episode_type: "repost_created",
         actor_id: actorId,
+        actor_name: actorName,
         target_actor_id: d.target,
         content: `Amplified post ${d.target}`,
         topic: action.actorTopics[0],
@@ -216,6 +237,7 @@ function mapActionToEpisodes(
         round_num: roundNum,
         episode_type: "follow_changed",
         actor_id: actorId,
+        actor_name: actorName,
         target_actor_id: d.target,
         content: `${d.action === "follow" ? "Started following" : "Stopped following"} ${d.target}`,
         metadata: { action: d.action, reasoning: d.reasoning },
@@ -230,6 +252,7 @@ function mapActionToEpisodes(
         round_num: roundNum,
         episode_type: "mute_changed",
         actor_id: actorId,
+        actor_name: actorName,
         target_actor_id: d.target,
         content: `Muted ${d.target}`,
         metadata: { reasoning: d.reasoning },
@@ -244,6 +267,7 @@ function mapActionToEpisodes(
         round_num: roundNum,
         episode_type: "block_changed",
         actor_id: actorId,
+        actor_name: actorName,
         target_actor_id: d.target,
         content: `Blocked ${d.target}`,
         metadata: { reasoning: d.reasoning },

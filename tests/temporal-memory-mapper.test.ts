@@ -119,16 +119,17 @@ describe("deriveTemporalEpisodes", () => {
     expect(call.episode_type).toBe("block_changed");
   });
 
-  it("generates comment_created for comment action", () => {
+  it("generates comment_created + opinion_expressed for comment action", () => {
     const actions = [
       makeAction({
         decision: { action: "comment", target: "post-1", content: "Interesting take", reasoning: "wanted to engage" },
       }),
     ];
     const count = deriveTemporalEpisodes(store, "run-1", 0, actions, [], []);
-    expect(count).toBe(1);
-    const call = (store.insertOutboxEpisode as any).mock.calls[0][0];
-    expect(call.episode_type).toBe("comment_created");
+    expect(count).toBe(2); // comment_created + opinion_expressed
+    const calls = (store.insertOutboxEpisode as any).mock.calls;
+    expect(calls[0][0].episode_type).toBe("comment_created");
+    expect(calls[1][0].episode_type).toBe("opinion_expressed");
   });
 
   it("generates repost_created for repost action", () => {

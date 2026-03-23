@@ -136,15 +136,18 @@ class FalkorDBTemporalMemoryProvider implements TemporalMemoryProvider {
           }
         );
 
-        // Ensure Actor node exists and link
+        // Ensure Actor node exists (with name) and link to episode
         await this.graph.query(
           `MERGE (a:Actor {actor_id: $actorId, run_id: $runId})
+           ON CREATE SET a.name = $actorName
+           ON MATCH SET a.name = CASE WHEN a.name IS NULL THEN $actorName ELSE a.name END
            WITH a
            MATCH (e:Episode {id: $epId})
            CREATE (a)-[:PERFORMED {round: $roundNum}]->(e)`,
           {
             params: {
               actorId: ep.actor_id,
+              actorName: ep.actor_name ?? "",
               runId,
               epId: ep.id,
               roundNum: ep.round_num,
