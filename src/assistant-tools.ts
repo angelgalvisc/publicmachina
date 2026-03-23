@@ -63,6 +63,7 @@ import {
 import { saveConfig } from "./config.js";
 import { formatSimulationPlan, validateSimulationSpec } from "./design.js";
 import { designCast } from "./cast-design.js";
+import type { FeedAlgorithm } from "./platform.js";
 import { prepareGroundedRun } from "./grounding.js";
 import {
   acquireActiveRunLock,
@@ -81,6 +82,7 @@ export type AssistantToolName =
   | "query_simulation"
   | "interview_actor"
   | "generate_report"
+  | "investigate_simulation"
   | "list_history"
   | "export_agent"
   | "switch_provider";
@@ -117,6 +119,9 @@ export const ASSISTANT_TOOLS: AssistantToolDefinition[] = [
     parameters: {
       brief: "string — the scenario brief, constraints, URLs, and desired outputs",
       docsPath: "string? — optional local documents path when the user explicitly references local files",
+      feedAlgorithm: "string? — feed ranking algorithm: chronological, heuristic, hybrid, social-hybrid, or twhin-hybrid",
+      twhinEnabled: "boolean? — enable TwHIN-BERT social embeddings for feed ranking",
+      temporalMemoryEnabled: "boolean? — enable temporal memory with Graphiti (experimental, requires FalkorDB)",
     },
   },
   {
@@ -129,6 +134,9 @@ export const ASSISTANT_TOOLS: AssistantToolDefinition[] = [
       docsPath: "string? — source documents path override when the active design should not be used as-is",
       confirmed: "boolean? — true only after the user has explicitly confirmed the run",
       offline: "boolean? — true only when the user explicitly wants a non-grounded offline run",
+      feedAlgorithm: "string? — override feed ranking algorithm for this run",
+      twhinEnabled: "boolean? — enable TwHIN-BERT social embeddings",
+      temporalMemoryEnabled: "boolean? — enable temporal memory (experimental)",
     },
   },
   {
@@ -167,6 +175,17 @@ export const ASSISTANT_TOOLS: AssistantToolDefinition[] = [
     parameters: {
       dbPath: "string? — explicit SQLite path",
       runId: "string? — explicit run ID",
+    },
+  },
+  {
+    name: "investigate_simulation",
+    description:
+      "Use this after a run completes when the user wants a deep investigative analysis using the ReACT agent. It iteratively queries the database, interviews actors, and synthesizes findings. More thorough than generate_report but requires more time and API calls.",
+    parameters: {
+      objective: "string — the analytical question or investigation objective",
+      dbPath: "string? — explicit SQLite path",
+      runId: "string? — explicit run ID",
+      maxSteps: "number? — maximum analysis iterations (default: 5)",
     },
   },
   {
@@ -220,6 +239,7 @@ export function getAvailableAssistantTools(taskState: AssistantTaskState): Assis
     available.add("query_simulation");
     available.add("interview_actor");
     available.add("generate_report");
+    available.add("investigate_simulation");
     available.add("export_agent");
   }
 
@@ -245,6 +265,8 @@ export async function executeAssistantTool(
         return await interviewActorTool(args, runtime);
       case "generate_report":
         return await generateReportTool(args, runtime);
+      case "investigate_simulation":
+        return await investigateSimulationTool(args, runtime);
       case "list_history":
         return await listHistoryTool(args, runtime);
       case "export_agent":
@@ -282,6 +304,25 @@ async function designSimulationTool(
     docsPath: stringifyArg(args.docsPath) ?? undefined,
     workspace: runtime.workspace,
   });
+
+  // Apply experimental feature overrides to the generated config
+  if (args.feedAlgorithm || args.twhinEnabled !== undefined || args.temporalMemoryEnabled !== undefined) {
+    try {
+      const generatedConfig = loadConfig(result.configPath);
+      if (args.feedAlgorithm) {
+        generatedConfig.feed.algorithm = args.feedAlgorithm as FeedAlgorithm;
+      }
+      if (args.twhinEnabled !== undefined) {
+        generatedConfig.feed.twhin = { ...generatedConfig.feed.twhin, enabled: booleanArg(args.twhinEnabled) ?? false };
+      }
+      if (args.temporalMemoryEnabled !== undefined) {
+        generatedConfig.temporalMemory = { ...generatedConfig.temporalMemory, enabled: booleanArg(args.temporalMemoryEnabled) ?? false };
+      }
+      saveConfig(result.configPath, generatedConfig);
+    } catch {
+      // Non-fatal: overrides will be applied at run time
+    }
+  }
 
   const materializedDocs =
     result.spec.docsPath
@@ -395,6 +436,15 @@ async function runSimulationTool(
   }
 
   const runConfig = loadConfig(configPath);
+  if (args.feedAlgorithm) {
+    runConfig.feed.algorithm = args.feedAlgorithm as FeedAlgorithm;
+  }
+  if (args.twhinEnabled !== undefined) {
+    runConfig.feed.twhin = { ...runConfig.feed.twhin, enabled: booleanArg(args.twhinEnabled) ?? false };
+  }
+  if (args.temporalMemoryEnabled !== undefined) {
+    runConfig.temporalMemory = { ...runConfig.temporalMemory, enabled: booleanArg(args.temporalMemoryEnabled) ?? false };
+  }
   const offline = booleanArg(args.offline) ?? false;
   const preparedConfig = await prepareGroundedRun(runConfig, { offline });
   const estimate = estimatePipelineRun(preparedConfig);
@@ -782,6 +832,75 @@ async function generateReportTool(
       details: `Report: ${reportPath}\n\n${result.narrative ?? "No narrative generated."}`,
     };
   } finally {
+    store.close();
+  }
+}
+
+async function investigateSimulationTool(
+  args: Record<string, unknown>,
+  runtime: AssistantToolRuntime
+): Promise<AssistantToolResult> {
+  const { dbPath, runId } = resolveRunTarget(runtime, args) ?? { dbPath: null, runId: null };
+  if (!dbPath) {
+    return {
+      status: "error",
+      summary: "No simulation database is available for investigation.",
+    };
+  }
+
+  const objective = stringifyArg(args.objective);
+  if (!objective) {
+    return {
+      status: "error",
+      summary: "An investigation objective is required.",
+    };
+  }
+
+  const store = new SQLiteGraphStore(dbPath);
+  const targetRunId = runId ?? store.getLatestRunId();
+  if (!targetRunId) {
+    store.close();
+    return {
+      status: "error",
+      summary: "No run found in the database.",
+    };
+  }
+
+  const llm = createFeatureLlm(runtime.config, { mock: runtime.mock, feature: "report" });
+  const backend = runtime.mock
+    ? new MockCognitionBackend()
+    : new DirectLLMBackend(llm, store, { runId: targetRunId, promptVersion: getPromptVersion() });
+
+  try {
+    await backend.start();
+    const { runReportAgent } = await import("./report-agent.js");
+    const maxSteps = typeof args.maxSteps === "number" ? args.maxSteps : 5;
+    const result = await runReportAgent(store, llm, backend, {
+      runId: targetRunId,
+      objective,
+      maxSteps,
+    });
+
+    const details = [
+      `Objective: ${result.objective}`,
+      `Steps: ${result.steps.length}`,
+      `Actors interviewed: ${result.actorsInterviewed.join(", ") || "none"}`,
+      `Queries executed: ${result.queriesExecuted}`,
+      "",
+      "Key findings:",
+      ...result.keyFindings.map((f) => `  - ${f}`),
+      "",
+      "Synthesis:",
+      result.synthesis,
+    ];
+
+    return {
+      status: "completed",
+      summary: `Investigation completed: ${result.keyFindings.length} key findings.`,
+      details: details.join("\n"),
+    };
+  } finally {
+    await backend.shutdown();
     store.close();
   }
 }

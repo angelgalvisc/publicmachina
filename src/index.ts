@@ -1945,6 +1945,70 @@ export function createProgram(io: CliIO = defaultIO): Command {
       }
     });
 
+  // ═══════════════════════════════════════════════════════
+  // INVESTIGATE
+  // ═══════════════════════════════════════════════════════
+
+  program
+    .command("investigate")
+    .description("Run a ReACT-style investigative analysis on a completed simulation")
+    .requiredOption("--db <path>", "SQLite database path")
+    .option("--run <id>", "run ID")
+    .option("--objective <text>", "investigation objective/question")
+    .option("--max-steps <n>", "maximum analysis iterations", "5")
+    .option("--config <path>", "config YAML file", DEFAULT_CONFIG_PATH)
+    .option("--mock", "use mock backends")
+    .action(async (opts) => {
+      const store = new SQLiteGraphStore(opts.db);
+      try {
+        const runId = opts.run ?? store.getLatestRunId();
+        if (!runId) throw new Error("No runs found in database.");
+
+        const objective = opts.objective;
+        if (!objective) {
+          throw new Error("--objective is required. Provide the analytical question to investigate.");
+        }
+
+        const config = getConfig(opts.config);
+        const maxSteps = parseIntOption(opts.maxSteps, "max-steps");
+        const llm = createFeatureLlm(config, { mock: opts.mock, feature: "report" });
+        const backend = opts.mock
+          ? new MockCognitionBackend()
+          : new DirectLLMBackend(llm, store, { runId, promptVersion: getPromptVersion() });
+
+        await backend.start();
+        try {
+          const { runReportAgent } = await import("./report-agent.js");
+          const result = await runReportAgent(store, llm, backend, {
+            runId,
+            objective,
+            maxSteps,
+          });
+
+          io.stdout(`Investigation for run ${runId}\n`);
+          io.stdout(`Objective: ${result.objective}\n`);
+          io.stdout(`Steps: ${result.steps.length}\n`);
+          io.stdout(`Actors interviewed: ${result.actorsInterviewed.join(", ") || "none"}\n`);
+          io.stdout(`Queries executed: ${result.queriesExecuted}\n\n`);
+
+          if (result.keyFindings.length > 0) {
+            io.stdout("Key findings:\n");
+            for (const finding of result.keyFindings) {
+              io.stdout(`  - ${finding}\n`);
+            }
+            io.stdout("\n");
+          }
+
+          io.stdout("Synthesis:\n");
+          io.stdout(`${result.synthesis}\n`);
+        } finally {
+          await backend.shutdown();
+        }
+      } finally {
+        store.close();
+      }
+    });
+
   program
     .command("history")
     .description("Show previous assistant-tracked simulations from the workspace")

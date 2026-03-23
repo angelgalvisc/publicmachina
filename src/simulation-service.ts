@@ -42,7 +42,7 @@ export interface DesignedSimulationArtifacts extends SimulationDesignResult {
 }
 
 export interface PipelineCallbacks {
-  onPhase?: (phase: "ingest" | "analyze" | "generate" | "simulate") => void;
+  onPhase?: (phase: "ingest" | "analyze" | "enrich" | "generate" | "simulate") => void;
   onRound?: (progress: EngineRoundProgress) => void;
 }
 
@@ -259,6 +259,18 @@ export async function executePipeline(
     });
     claimsExtracted = ontology.claimsExtracted;
     entitiesCreated = graph.entitiesCreated;
+
+    // Cast enrichment: validate and correct entity types using graph relationships
+    input.callbacks?.onPhase?.("enrich");
+    const { validateEntityTypes } = await import("./cast-enrichment.js");
+    const entityCorrections = validateEntityTypes(store);
+    for (const correction of entityCorrections) {
+      store.updateEntityType(correction.entityId, correction.suggestedType);
+    }
+    if (entityCorrections.length > 0) {
+      // eslint-disable-next-line no-console
+      console.log(`[enrich] Applied ${entityCorrections.length} entity type correction(s).`);
+    }
 
     throwIfStopRequested({
       signal: input.signal,

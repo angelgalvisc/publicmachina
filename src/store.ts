@@ -78,6 +78,9 @@ export interface GraphStore {
   linkClaimToEntity(entityId: string, claimId: string): void;
   linkClaimToEdge(edgeId: string, claimId: string): void;
 
+  // Entity updates
+  updateEntityType(entityId: string, newType: string): void;
+
   // Aliases + Merges
   addAlias(entityId: string, alias: string, source: string): void;
   mergeEntities(
@@ -460,6 +463,12 @@ export class SQLiteGraphStore implements GraphStore {
       .run(id, entity.name, entity.attributes ?? "");
 
     return id;
+  }
+
+  updateEntityType(entityId: string, newType: string): void {
+    this.db
+      .prepare(`UPDATE entities SET type = ? WHERE id = ?`)
+      .run(newType, entityId);
   }
 
   addEdge(edge: Edge): string {
