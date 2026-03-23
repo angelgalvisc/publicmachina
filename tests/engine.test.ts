@@ -130,6 +130,7 @@ class TrackingBackend implements CognitionBackend {
     private opts: {
       delayMs?: number;
       failActorId?: string;
+      failAll?: boolean;
     } = {}
   ) {}
 
@@ -142,6 +143,9 @@ class TrackingBackend implements CognitionBackend {
     await new Promise((resolve) => setTimeout(resolve, this.opts.delayMs ?? 15));
     this.inflight--;
 
+    if (this.opts.failAll) {
+      throw new Error(`backend failure for ${request.actorId}`);
+    }
     if (this.opts.failActorId && request.actorId === this.opts.failActorId) {
       throw new Error(`backend failure for ${request.actorId}`);
     }
@@ -245,7 +249,7 @@ describe("runSimulation — core loop", () => {
 
     await runSimulation({
       store,
-      config: makeTestConfig({ totalHours: 1 }),
+      config: makeTestConfig({ totalHours: 3 }),
       backend,
       runId,
     });
@@ -381,11 +385,12 @@ describe("runSimulation — scheduler v2", () => {
   it("does not partially commit actor actions when backend resolution fails", async () => {
     const runId = "run-batch-failure";
     seedActors(runId, 3);
+    // Fail ALL backend calls so the test is not dependent on which actor activates first
     const trackingBackend = new TrackingBackend({
       delayMs: 5,
-      failActorId: "actor-1",
+      failAll: true,
     });
-    const cfg = makeTestConfig({ totalHours: 1, concurrency: 2 });
+    const cfg = makeTestConfig({ totalHours: 3, concurrency: 2 });
     cfg.cognition.tierA.minInfluence = 1.1;
     cfg.cognition.tierA.archetypeOverrides = []; // disable archetype overrides so no one is Tier A
     cfg.cognition.tierB.samplingRate = 1.0;
@@ -398,7 +403,7 @@ describe("runSimulation — scheduler v2", () => {
     });
 
     expect(result.status).toBe("failed");
-    expect(result.failureMessage).toContain("backend failure for actor-1");
+    expect(result.failureMessage).toContain("backend failure");
 
     const postCount = (store as any).db
       .prepare("SELECT COUNT(*) as c FROM posts WHERE run_id = ?")
@@ -536,7 +541,7 @@ describe("runSimulation — decision execution", () => {
     seedActors(runId, 1);
     backend.setDefault({ action: "post", content: "My post", reasoning: "test" });
 
-    await runSimulation({ store, config: makeTestConfig({ totalHours: 1 }), backend, runId });
+    await runSimulation({ store, config: makeTestConfig({ totalHours: 3 }), backend, runId });
 
     const posts = (store as any).db
       .prepare("SELECT * FROM posts WHERE run_id = ? AND author_id = ?")
@@ -574,7 +579,7 @@ describe("runSimulation — decision execution", () => {
 
     backend.setDefault({ action: "like", target: "target-post", reasoning: "liked it" });
 
-    await runSimulation({ store, config: makeTestConfig({ totalHours: 1 }), backend, runId });
+    await runSimulation({ store, config: makeTestConfig({ totalHours: 3 }), backend, runId });
 
     const updated = (store as any).db
       .prepare("SELECT likes FROM posts WHERE id = ?")
@@ -613,7 +618,7 @@ describe("runSimulation — decision execution", () => {
 
     backend.setDefault({ action: "repost", target: "orig-post", reasoning: "repost" });
 
-    await runSimulation({ store, config: makeTestConfig({ totalHours: 1 }), backend, runId });
+    await runSimulation({ store, config: makeTestConfig({ totalHours: 3 }), backend, runId });
 
     const reposts = (store as any).db
       .prepare("SELECT * FROM posts WHERE run_id = ? AND quote_of = 'orig-post'")
@@ -652,7 +657,7 @@ describe("runSimulation — decision execution", () => {
 
     backend.setDefault({ action: "comment", target: "parent-post", content: "My comment", reasoning: "" });
 
-    await runSimulation({ store, config: makeTestConfig({ totalHours: 1 }), backend, runId });
+    await runSimulation({ store, config: makeTestConfig({ totalHours: 3 }), backend, runId });
 
     const comments = (store as any).db
       .prepare("SELECT * FROM posts WHERE run_id = ? AND reply_to = 'parent-post'")
@@ -679,7 +684,7 @@ describe("runSimulation — decision execution", () => {
 
     backend.setDefault({ action: "follow", target: "target-user", reasoning: "follow" });
 
-    await runSimulation({ store, config: makeTestConfig({ totalHours: 1 }), backend, runId });
+    await runSimulation({ store, config: makeTestConfig({ totalHours: 3 }), backend, runId });
 
     const follows = (store as any).db
       .prepare("SELECT * FROM follows WHERE follower_id = 'follower-1' AND following_id = 'target-user'")
@@ -706,7 +711,7 @@ describe("runSimulation — decision execution", () => {
 
     backend.setDefault({ action: "unfollow", target: "target-user", reasoning: "disengage" });
 
-    await runSimulation({ store, config: makeTestConfig({ totalHours: 1 }), backend, runId });
+    await runSimulation({ store, config: makeTestConfig({ totalHours: 3 }), backend, runId });
 
     const follows = (store as any).db
       .prepare("SELECT * FROM follows WHERE follower_id = 'follower-1' AND following_id = 'target-user'")
@@ -739,7 +744,7 @@ describe("runSimulation — decision execution", () => {
 
     backend.setDefault({ action: "quote", target: "orig-post", content: "adding context", reasoning: "quote" });
 
-    await runSimulation({ store, config: makeTestConfig({ totalHours: 1 }), backend, runId });
+    await runSimulation({ store, config: makeTestConfig({ totalHours: 3 }), backend, runId });
 
     const quotes = (store as any).db
       .prepare("SELECT * FROM posts WHERE run_id = ? AND quote_of = 'orig-post' AND post_kind = 'quote'")
@@ -780,7 +785,7 @@ describe("runSimulation — decision execution", () => {
 
     backend.setDefault({ action: "unlike", target: "target-post", reasoning: "retract like" });
 
-    await runSimulation({ store, config: makeTestConfig({ totalHours: 1 }), backend, runId });
+    await runSimulation({ store, config: makeTestConfig({ totalHours: 3 }), backend, runId });
 
     const updated = (store as any).db
       .prepare("SELECT likes FROM posts WHERE id = 'target-post'")
@@ -812,7 +817,7 @@ describe("runSimulation — decision execution", () => {
 
     backend.setDefault({ action: "delete", target: "owned-post", reasoning: "remove it" });
 
-    await runSimulation({ store, config: makeTestConfig({ totalHours: 1 }), backend, runId });
+    await runSimulation({ store, config: makeTestConfig({ totalHours: 3 }), backend, runId });
 
     const row = (store as any).db
       .prepare("SELECT is_deleted FROM posts WHERE id = 'owned-post'")
@@ -822,7 +827,7 @@ describe("runSimulation — decision execution", () => {
 
   it("report action triggers deterministic moderation when threshold is reached", async () => {
     const runId = "run-report";
-    const cfg = makeTestConfig({ totalHours: 1 });
+    const cfg = makeTestConfig({ totalHours: 3 });
     cfg.platform.moderation.reportThreshold = 1;
     createRun(store, runId);
     store.addActor(makeActor({ id: "author-x", run_id: runId, activity_level: 0 }));

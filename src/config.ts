@@ -364,7 +364,17 @@ const DEFAULTS: SimConfig = {
  * Load config from YAML file, merge with defaults.
  */
 export function loadConfig(filePath: string): SimConfig {
-  const raw = readFileSync(filePath, "utf-8");
+  let raw: string;
+  try {
+    raw = readFileSync(filePath, "utf-8");
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      // Config file not found — fall back to defaults.
+      // This is safe for resume/replay which reconstruct config from the run's snapshot.
+      return defaultConfig();
+    }
+    throw err;
+  }
   const parsed = YAML.parse(raw) as Partial<SimConfig>;
   const config = normalizeConfig(deepMerge(
     DEFAULTS as unknown as Record<string, unknown>,

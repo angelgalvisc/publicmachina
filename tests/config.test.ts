@@ -426,7 +426,7 @@ simulation:
 
     it("redacts assistant workspaceDir", () => {
       const config = defaultConfig();
-      config.assistant.workspaceDir = "/Users/agc/private-workspace";
+      config.assistant.workspaceDir = "/tmp/private-workspace";
 
       const parsed = JSON.parse(sanitizeForStorage(config));
       expect(parsed.assistant.workspaceDir).toBe("[REDACTED]");

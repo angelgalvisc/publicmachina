@@ -8,7 +8,6 @@
   "types": "./dist/index.d.ts",
   "files": [
     "dist/",
-    "docs/assets/publicmachina-network-hero.png",
     "LICENSE",
     "README.md",
     ".env.example"
