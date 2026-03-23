@@ -347,7 +347,7 @@ const DEFAULTS: SimConfig = {
   temporalMemory: {
     enabled: false,
     provider: "noop",
-    graphitiEndpoint: "bolt://localhost:6379",
+    graphitiEndpoint: "localhost:6379",
     flushStrategy: "end-of-round",
     contextBudget: {
       tierA: { maxFacts: 10, maxRelationships: 5, maxContradictions: 3 },

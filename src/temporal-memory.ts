@@ -128,7 +128,7 @@ export async function createTemporalMemoryProvider(
     // Dynamic import to avoid hard dependency on graphiti-core
     try {
       const mod = await import("./temporal-memory-graphiti.js");
-      const provider = mod.createGraphitiProvider(config.graphitiEndpoint ?? "bolt://localhost:6379");
+      const provider = mod.createGraphitiProvider(config.graphitiEndpoint ?? "localhost:6379");
 
       // Verify the provider is actually functional (not just a stub)
       const healthy = await provider.healthCheck();
