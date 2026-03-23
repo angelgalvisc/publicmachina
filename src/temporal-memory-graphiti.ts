@@ -20,13 +20,14 @@ class GraphitiTemporalMemoryProvider implements TemporalMemoryProvider {
 
   async healthCheck(): Promise<boolean> {
     // Phase A2: connect to FalkorDB/Neo4j and verify
-    console.warn(`[graphiti] healthCheck not yet implemented (endpoint: ${this.endpoint})`);
+    // Returns false until the real Graphiti integration is implemented after the spike.
     return false;
   }
 
   async appendEpisodes(_runId: string, _episodes: TemporalEpisode[]): Promise<void> {
     // Phase A3: ingest episodes into Graphiti
-    throw new Error("[graphiti] appendEpisodes not yet implemented — complete Phase A2/A3 first");
+    // Silently discard until real implementation — outbox rows remain as "pending"
+    // and will be synced once the real provider is implemented.
   }
 
   async queryActorContext(

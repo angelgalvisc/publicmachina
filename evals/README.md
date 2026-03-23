@@ -47,11 +47,17 @@ See `metrics.yaml` for formal definitions. Summary:
 Evaluations compare a **baseline** (current engine) against a **variant** (with new feature enabled).
 
 1. Capture baseline: run each scenario with current config, save .db
-2. Enable variant: change config (e.g., `temporalMemory.enabled: true`)
+2. Enable variant: change config for the feature being tested
 3. Run variant: same scenario, same seed, save .db
 4. Extract metrics from both .db files
 5. Compare using metrics.yaml definitions
 6. Document findings in `results/`
+
+**Important notes on variant availability:**
+
+- **Graphiti memory** (`temporalMemory.enabled: true`): **NOT runnable yet.** The Graphiti provider is a stub pending the Phase A1 spike. Enabling it will write episodes to the outbox table but produce zero temporal context for decisions. Wait for the spike to validate and implement the real provider before running memory evaluations.
+- **TwHIN-BERT feed** (`feed.twhin.enabled: true`): Requires `@huggingface/transformers` to be installed (`npm install @huggingface/transformers`). Without the package, the provider silently falls back to zero vectors, producing no real signal. The run will not fail, but the comparison will be invalid.
+- **Cast enrichment**: Available now — uses existing graph data.
 
 ## Adoption rule
 

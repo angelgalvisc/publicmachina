@@ -93,9 +93,15 @@ export class TwHINBERTProvider implements EmbeddingProvider {
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+
+      // Any failure to load = warn clearly and fall back to zero vectors.
+      // The warning is loud enough that users will notice in logs, but
+      // we don't crash the simulation — the eval framework (evals/README.md)
+      // documents that TwHIN results without the package are invalid.
       console.warn(
         `[twhin] Failed to load @huggingface/transformers or model "${this.model}": ${message}. ` +
-        `TwHIN embeddings will return zero vectors. Install with: npm install @huggingface/transformers`
+        `TwHIN embeddings will return zero vectors. ` +
+        `For real social-representation embeddings, install: npm install @huggingface/transformers`
       );
       this.pipeline = null;
     }

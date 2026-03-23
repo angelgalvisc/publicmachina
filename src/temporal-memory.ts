@@ -128,7 +128,23 @@ export async function createTemporalMemoryProvider(
     // Dynamic import to avoid hard dependency on graphiti-core
     try {
       const mod = await import("./temporal-memory-graphiti.js");
-      return mod.createGraphitiProvider(config.graphitiEndpoint ?? "bolt://localhost:6379");
+      const provider = mod.createGraphitiProvider(config.graphitiEndpoint ?? "bolt://localhost:6379");
+
+      // Verify the provider is actually functional (not just a stub)
+      const healthy = await provider.healthCheck();
+      if (!healthy) {
+        console.warn(
+          `[temporal-memory] Graphiti provider loaded but healthCheck returned false. ` +
+          `The Graphiti integration is not yet fully implemented (Phase A1 spike required). ` +
+          `Episodes will be written to the outbox but NOT synced to a graph backend. ` +
+          `Falling back to NoopTemporalMemoryProvider for context retrieval.`
+        );
+        // Return a hybrid: Noop for reads (no false context), but the outbox
+        // write path in the mapper still works for future sync.
+        return new NoopTemporalMemoryProvider();
+      }
+
+      return provider;
     } catch (err) {
       console.warn(
         `[temporal-memory] Failed to load Graphiti provider: ${(err as Error).message}. ` +

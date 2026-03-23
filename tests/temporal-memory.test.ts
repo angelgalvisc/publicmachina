@@ -61,16 +61,18 @@ describe("createTemporalMemoryProvider", () => {
     expect(provider).toBeInstanceOf(NoopTemporalMemoryProvider);
   });
 
-  it("falls back to NoopProvider when graphiti module fails to satisfy requirements", async () => {
-    // The graphiti stub provider exists but healthCheck returns false
-    // Factory should still succeed — it returns whatever the module creates
+  it("falls back to NoopProvider when Graphiti stub healthCheck returns false", async () => {
+    // The graphiti stub provider exists but healthCheck returns false.
+    // The factory detects this and falls back to NoopProvider for reads,
+    // while the outbox write path still works for future sync.
     const provider = await createTemporalMemoryProvider({
       enabled: true,
       provider: "graphiti",
       graphitiEndpoint: "bolt://localhost:9999",
     });
-    // Should not throw — returns the stub Graphiti provider
+    // Should return Noop (healthy) because stub was detected
     expect(provider).toBeDefined();
-    expect(await provider.healthCheck()).toBe(false);
+    expect(provider).toBeInstanceOf(NoopTemporalMemoryProvider);
+    expect(await provider.healthCheck()).toBe(true);
   });
 });

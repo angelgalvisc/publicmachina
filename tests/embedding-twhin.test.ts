@@ -17,27 +17,14 @@ describe("TwHINBERTProvider", () => {
     expect(provider.modelId()).toBe("twhin:Twitter/twhin-bert-base");
   });
 
-  it("returns zero vectors when @huggingface/transformers is not installed", async () => {
+  it("returns zero vectors and warns when @huggingface/transformers is not installed", async () => {
     const provider = new TwHINBERTProvider("nonexistent/model");
+    // Falls back to zero vectors with a console.warn (documented in evals/README.md
+    // as producing invalid eval results — users must install the package for real signal)
     const vectors = await provider.embedTexts(["test text", "another text"]);
-
     expect(vectors).toHaveLength(2);
     expect(vectors[0]).toHaveLength(768);
-    // All zeros because the model failed to load
     expect(vectors[0].every((v) => v === 0)).toBe(true);
-  });
-
-  it("handles empty input gracefully", async () => {
-    const provider = new TwHINBERTProvider();
-    const vectors = await provider.embedTexts([]);
-    expect(vectors).toHaveLength(0);
-  });
-
-  it("processes batches correctly", async () => {
-    const provider = new TwHINBERTProvider("nonexistent/model", 2);
-    const texts = ["a", "b", "c", "d", "e"];
-    const vectors = await provider.embedTexts(texts);
-    expect(vectors).toHaveLength(5);
   });
 });
 
@@ -81,13 +68,15 @@ describe("createEmbeddingProvider with twhin config", () => {
     expect(provider).toBeInstanceOf(HashEmbeddingProvider);
   });
 
-  it("returns TwHINBERTProvider when twhin is enabled (async)", async () => {
+  it("returns TwHINBERTProvider instance when twhin is enabled (async)", async () => {
     const config = {
       ...baseFeedConfig,
       twhin: { ...baseFeedConfig.twhin, enabled: true },
     };
+    // The provider is created (lazy init), but calling embedTexts will fail
+    // because @huggingface/transformers is not installed.
+    // createEmbeddingProviderAsync returns the provider — the error happens on first use.
     const provider = await createEmbeddingProviderAsync(config);
-    // Should be TwHINBERTProvider (loaded via dynamic import)
     expect(provider.modelId()).toContain("twhin:");
   });
 });

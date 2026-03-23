@@ -657,11 +657,13 @@ function validateConfig(config: SimConfig): void {
       "trace-aware",
       "embedding",
       "hybrid",
+      "social-hybrid",
+      "twhin-hybrid",
     ].includes(config.feed.algorithm)
   ) {
     errors.push(
       new ConfigError(
-        "feed.algorithm must be chronological, heuristic, trace-aware, embedding, or hybrid",
+        "feed.algorithm must be chronological, heuristic, trace-aware, embedding, hybrid, social-hybrid, or twhin-hybrid",
         "feed.algorithm"
       )
     );
@@ -761,6 +763,75 @@ function validateConfig(config: SimConfig): void {
         "feed.embeddingDimensions"
       )
     );
+  }
+
+  // TwHIN feed config
+  if (config.feed.twhin) {
+    if (config.feed.twhin.weight < 0 || config.feed.twhin.weight > 1) {
+      errors.push(
+        new ConfigError(
+          "feed.twhin.weight must be between 0 and 1",
+          "feed.twhin.weight"
+        )
+      );
+    }
+    if (config.feed.twhin.batchSize < 1) {
+      errors.push(
+        new ConfigError(
+          "feed.twhin.batchSize must be >= 1",
+          "feed.twhin.batchSize"
+        )
+      );
+    }
+    if (!config.feed.twhin.model.trim()) {
+      errors.push(
+        new ConfigError(
+          "feed.twhin.model must not be empty",
+          "feed.twhin.model"
+        )
+      );
+    }
+    // social-hybrid and twhin-hybrid require embedding or twhin to be enabled
+    if (
+      (config.feed.algorithm === "social-hybrid" || config.feed.algorithm === "twhin-hybrid") &&
+      !config.feed.embeddingEnabled &&
+      !config.feed.twhin.enabled
+    ) {
+      errors.push(
+        new ConfigError(
+          `feed.algorithm "${config.feed.algorithm}" requires feed.embeddingEnabled or feed.twhin.enabled to be true`,
+          "feed.algorithm"
+        )
+      );
+    }
+  }
+
+  // Temporal memory config
+  if (config.temporalMemory) {
+    if (config.temporalMemory.provider !== "noop" && config.temporalMemory.provider !== "graphiti") {
+      errors.push(
+        new ConfigError(
+          'temporalMemory.provider must be "noop" or "graphiti"',
+          "temporalMemory.provider"
+        )
+      );
+    }
+    if (config.temporalMemory.contextBudget.tierA.maxFacts < 0) {
+      errors.push(
+        new ConfigError(
+          "temporalMemory.contextBudget.tierA.maxFacts must be >= 0",
+          "temporalMemory.contextBudget.tierA.maxFacts"
+        )
+      );
+    }
+    if (config.temporalMemory.contextBudget.tierB.maxFacts < 0) {
+      errors.push(
+        new ConfigError(
+          "temporalMemory.contextBudget.tierB.maxFacts must be >= 0",
+          "temporalMemory.contextBudget.tierB.maxFacts"
+        )
+      );
+    }
   }
 
   // Search

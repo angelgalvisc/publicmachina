@@ -50,14 +50,13 @@ export function createEmbeddingProvider(config: FeedConfig): EmbeddingProvider {
  */
 export async function createEmbeddingProviderAsync(config: FeedConfig): Promise<EmbeddingProvider> {
   if (config.twhin?.enabled) {
-    try {
-      const { createTwhinProvider } = await import("./embedding-twhin.js");
-      return createTwhinProvider(config.twhin.model, config.twhin.batchSize);
-    } catch {
-      console.warn(
-        "[embeddings] TwHIN enabled but embedding-twhin module failed to load. Falling back to hash embeddings."
-      );
-    }
+    // Let the import succeed (it's a local module), but the provider's
+    // loadModel() may throw if @huggingface/transformers is not installed.
+    // That error is intentionally NOT caught here — if twhin.enabled is true,
+    // the user expects it to work, and a silent fallback to hash embeddings
+    // would produce invalid evaluation results.
+    const { createTwhinProvider } = await import("./embedding-twhin.js");
+    return createTwhinProvider(config.twhin.model, config.twhin.batchSize);
   }
   return new HashEmbeddingProvider(config.embeddingModel, config.embeddingDimensions);
 }

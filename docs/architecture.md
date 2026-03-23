@@ -241,7 +241,17 @@ Replay/resume support now relies on two persisted artifacts in SQLite:
 - `snapshots` capture round checkpoints plus PRNG state and fired threshold triggers for resume.
 - `run_scaffolds` capture the pre-round simulation scaffold so a copied database can replay a run against `decision_cache`.
 
-SQLite schema evolution is versioned through `PRAGMA user_version`. Fresh databases are created at the current schema version, and legacy databases are upgraded forward through explicit migrations before the store is used.
+SQLite schema evolution is versioned through `PRAGMA user_version` (currently v5). Fresh databases are created at the current schema version, and legacy databases are upgraded forward through explicit migrations before the store is used.
+
+### Opt-in subsystems (feature-flagged, disabled by default)
+
+Three subsystems were added as part of the product evolution plan. All are disabled by default and gated behind config flags. When disabled, they add zero overhead.
+
+**Temporal memory** (`config.temporalMemory.enabled`): Adds a temporal episode derivation step after `persistActorMemories()` each round. Episodes (post_created, follow_changed, belief_updated, etc.) are written to a `temporal_memory_outbox` table in SQLite. An async flush step at the end of each round sends pending episodes to the configured temporal memory provider (Graphiti or Noop). Before Tier A/B decisions, the provider is queried for relevant context within a per-tier token budget. Falls back to SQLite-only memory if the provider is unavailable. The Graphiti provider is currently a stub pending the Phase A1 spike.
+
+**TwHIN-BERT feed** (`config.feed.twhin.enabled`): Replaces the default hash-based embedding provider with Twitter/twhin-bert-base for social-representation embeddings. Requires `@huggingface/transformers` to be installed. Enables `social-hybrid` and `twhin-hybrid` feed algorithms that combine social-representation similarity, trace-aware scoring, and community affinity signals.
+
+**Cast enrichment**: Enriched source summaries (with named entities and central claims) improve cast design grounding. Graph-backed entity type validation cross-references claim predicates. Community-influenced follow probability and sentiment bias replace flat random initialization.
 
 ### Pipeline concurrency
 
@@ -257,6 +267,7 @@ The simulation database centers on:
 - `posts`, `exposures`, `rounds`, `runs`
 - `search_cache`, `search_requests`
 - `decision_traces`, `run_scaffolds`, `snapshots`, `decision_cache`
+- `temporal_memory_outbox`, `temporal_memory_sync_state` (schema v5, opt-in)
 - telemetry, embeddings, moderation, and narrative state
 
 The full schema references already live in:
@@ -346,7 +357,15 @@ What it does not preserve yet:
 | `ids.ts` | UUID and deterministic ID helpers |
 | `types.ts` | Shared row, snapshot, and DTO type declarations |
 | `config.ts` | YAML config parsing, validation, sanitization, and assistant limits |
-| `store.ts` / `schema.ts` / `db.ts` | SQLite schema and store implementation |
+| `temporal-memory.ts` | TemporalMemoryProvider interface, NoopProvider, and async factory (opt-in, Phase A) |
+| `temporal-memory-graphiti.ts` | Graphiti stub provider — real implementation pending Phase A1 spike |
+| `temporal-memory-mapper.ts` | Episode derivation from round actions → outbox → async flush with retry |
+| `temporal-memory-retrieval.ts` | Context retrieval from temporal memory with tier-based budget and fallback |
+| `embedding-twhin.ts` | TwHIN-BERT social embedding provider via @huggingface/transformers (opt-in, Phase B) |
+| `cast-enrichment.ts` | Source document enrichment, graph-backed type validation, community follow/sentiment (Phase C) |
+| `eval-metrics.ts` | Evaluation metric extraction and A/B comparison for quality and runtime metrics |
+| `report-agent.ts` | ReACT-style investigative analysis orchestrator with query, interview, metrics, and context tools |
+| `store.ts` / `schema.ts` / `db.ts` | SQLite schema (v5) and store implementation |
 
 ## Project structure
 
