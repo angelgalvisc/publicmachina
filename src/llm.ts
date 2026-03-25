@@ -28,6 +28,10 @@ export interface LLMRequestOptions {
   maxTokens?: number;
   temperature?: number;
   stopSequences?: string[];
+  /** When true, attempt to repair malformed JSON before failing. Only use for
+   *  non-critical paths (e.g. simulation decisions) — design/ontology callers
+   *  should keep the default (false) to fail-fast on unexpected shapes. */
+  allowRepair?: boolean;
 }
 
 type RuntimeClient =
@@ -153,9 +157,36 @@ export class LLMClient {
     try {
       data = JSON.parse(jsonStr) as T;
     } catch {
-      throw new Error(
-        `Failed to parse LLM JSON response from ${role} (model: ${response.model}):\n${jsonStr.slice(0, 200)}`
-      );
+      if (!options.allowRepair) {
+        throw new Error(
+          `Failed to parse LLM JSON response from ${role} (model: ${response.model}):\n${jsonStr.slice(0, 200)}`
+        );
+      }
+
+      // Mechanical repair: trailing commas, unclosed structures
+      const repaired = mechanicalJsonRepair(jsonStr);
+      try {
+        data = JSON.parse(repaired) as T;
+      } catch {
+        // LLM-assisted repair: ask the model to fix its own output
+        const repairResponse = await this.complete(role,
+          `The following JSON is malformed. Return ONLY valid JSON, nothing else:\n${jsonStr.slice(0, 800)}`,
+          { ...options, system: "Return only valid JSON. No explanation.", temperature: 0.0, allowRepair: undefined }
+        );
+        let repairStr = repairResponse.content.trim();
+        if (repairStr.startsWith("```json")) repairStr = repairStr.slice(7);
+        else if (repairStr.startsWith("```")) repairStr = repairStr.slice(3);
+        if (repairStr.endsWith("```")) repairStr = repairStr.slice(0, -3);
+        repairStr = repairStr.trim();
+
+        try {
+          data = JSON.parse(repairStr) as T;
+        } catch {
+          throw new Error(
+            `Failed to parse LLM JSON response from ${role} even after repair (model: ${response.model}):\n${jsonStr.slice(0, 200)}`
+          );
+        }
+      }
     }
 
     return {
@@ -402,4 +433,22 @@ export class MockLLMClient extends LLMClient {
   override getModel(_role: ProviderRole): string {
     return "mock-model";
   }
+}
+
+/**
+ * Attempt common mechanical fixes for malformed JSON from LLMs.
+ * Handles: trailing commas, unclosed brackets, single quotes.
+ */
+function mechanicalJsonRepair(json: string): string {
+  let s = json;
+  // Remove trailing commas before } or ]
+  s = s.replace(/,\s*}/g, "}").replace(/,\s*]/g, "]");
+  // Try to close unclosed brackets (truncated response)
+  const opens = (s.match(/{/g) ?? []).length;
+  const closes = (s.match(/}/g) ?? []).length;
+  if (opens > closes) s += "}".repeat(opens - closes);
+  const openBrackets = (s.match(/\[/g) ?? []).length;
+  const closeBrackets = (s.match(/]/g) ?? []).length;
+  if (openBrackets > closeBrackets) s += "]".repeat(openBrackets - closeBrackets);
+  return s;
 }

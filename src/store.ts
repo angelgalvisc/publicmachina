@@ -336,6 +336,7 @@ export interface GraphStore {
   ): SearchCacheRow | null;
   upsertSearchCache(entry: SearchCacheRow): void;
   addSearchRequest(entry: SearchRequestRow): void;
+  getSearchQueriesByActor(runId: string, actorId: string): string[];
   addSkippedRoundSpan(entry: SkippedRoundSpanRow): void;
   getSkippedRoundSpans(runId: string): SkippedRoundSpanRow[];
 
@@ -2385,6 +2386,19 @@ export class SQLiteGraphStore implements GraphStore {
         entry.cache_hit,
         entry.result_count
       );
+  }
+
+  getSearchQueriesByActor(runId: string, actorId: string): string[] {
+    const rows = this.db
+      .prepare(
+        `SELECT query FROM search_requests
+         WHERE run_id = ? AND actor_id = ?
+         GROUP BY query
+         ORDER BY MAX(round_num) DESC
+         LIMIT 10`
+      )
+      .all(runId, actorId) as Array<{ query: string }>;
+    return rows.map((r) => r.query);
   }
 
   addSkippedRoundSpan(entry: SkippedRoundSpanRow): void {

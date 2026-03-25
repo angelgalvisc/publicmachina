@@ -570,6 +570,7 @@ export interface RunManifest {
   replay_source_db?: string;
   replay_started_at?: string;
   version?: string;
+  failure_message?: string;
 }
 
 export interface DecisionTraceRow {

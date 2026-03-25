@@ -66,7 +66,7 @@ describe("migration v5 — temporal memory outbox", () => {
 
     // Verify version is now 5
     const version = db.pragma("user_version", { simple: true });
-    expect(version).toBe(5);
+    expect(version).toBe(6);
 
     // Verify outbox table exists and has correct columns
     const outboxCols = db
@@ -171,6 +171,6 @@ describe("migration v5 — temporal memory outbox", () => {
     applyStoreMigrations(db);
 
     const version = db.pragma("user_version", { simple: true });
-    expect(version).toBe(5);
+    expect(version).toBe(6);
   });
 });

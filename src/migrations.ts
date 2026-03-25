@@ -131,6 +131,17 @@ export function applyStoreMigrations(db: Database.Database): void {
         `);
       },
     },
+    {
+      version: 6,
+      apply: () => {
+        ensureColumn(
+          db,
+          "run_manifest",
+          "failure_message",
+          "ALTER TABLE run_manifest ADD COLUMN failure_message TEXT"
+        );
+      },
+    },
   ];
 
   for (const migration of migrations) {

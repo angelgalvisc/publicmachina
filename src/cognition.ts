@@ -293,6 +293,7 @@ export class DirectLLMBackend implements CognitionBackend {
         system: systemPrompt,
         temperature: 0.7,
         maxTokens: 512,
+        allowRepair: true,
       }
     );
 

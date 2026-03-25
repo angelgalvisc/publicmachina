@@ -709,6 +709,7 @@ export async function runSimulation(opts: EngineOptions): Promise<EngineResult> 
     store.updateRun(runId, {
       status: "failed",
       finished_at: new Date().toISOString(),
+      failure_message: failureMessage,
     });
 
     return {

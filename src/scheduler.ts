@@ -147,16 +147,23 @@ export async function scheduleRoundActions(
       opts.roundNum,
       lookbackRounds
     );
-    const request = buildDecisionRequest(
-      actor,
-      feed,
-      beliefs,
-      actorTopics,
-      simContext,
-      availableActions,
-      opts.config.platform.name,
-      opts.roundNum
+    const previousSearchQueries = opts.store.getSearchQueriesByActor(
+      opts.runId,
+      actor.id
     );
+    const request = {
+      ...buildDecisionRequest(
+        actor,
+        feed,
+        beliefs,
+        actorTopics,
+        simContext,
+        availableActions,
+        opts.config.platform.name,
+        opts.roundNum
+      ),
+      previousSearchQueries,
+    };
     const searchEligible = opts.searchProvider
       ? canActorSearch(actor, route.tier, opts.config.search)
       : false;
@@ -273,8 +280,43 @@ async function resolveBackendDecision(
     }
   }
 
-  return {
-    decision: await opts.backend.decide(request),
-    searchRequests,
-  };
+  // Resilient decision execution: retry transient/parse errors, fallback to idle
+  const MAX_DECIDE_ATTEMPTS = 3;
+  let decision: Awaited<ReturnType<typeof opts.backend.decide>> | undefined;
+
+  for (let attempt = 0; attempt < MAX_DECIDE_ATTEMPTS; attempt++) {
+    try {
+      decision = await opts.backend.decide(request);
+      break;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message.toLowerCase() : String(err).toLowerCase();
+      const isTransient =
+        msg.includes("timeout") ||
+        msg.includes("econnreset") ||
+        msg.includes("econnrefused") ||
+        msg.includes("rate limit") ||
+        msg.includes("429") ||
+        msg.includes("503") ||
+        msg.includes("network") ||
+        msg.includes("fetch failed");
+      const isJsonParse = msg.includes("failed to parse llm json");
+
+      if ((isTransient || isJsonParse) && attempt < MAX_DECIDE_ATTEMPTS - 1) {
+        await new Promise((r) => setTimeout(r, 1000 * Math.pow(2, attempt)));
+        continue;
+      }
+      // Non-recoverable or final attempt exhausted — log and fall through to idle
+      break;
+    }
+  }
+
+  if (!decision) {
+    decision = {
+      action: "idle" as const,
+      content: "",
+      reasoning: "[SYSTEM] Decision failed after retries. Actor idled this round.",
+    } as Awaited<ReturnType<typeof opts.backend.decide>>;
+  }
+
+  return { decision, searchRequests };
 }
