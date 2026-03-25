@@ -246,6 +246,8 @@ export async function extractOntology(
   for (const { chunk, claims } of chunkClaims) {
     for (let ci = 0; ci < claims.length; ci++) {
       const claim = claims[ci];
+      // Guard: skip claims with missing required fields
+      if (!claim.subject || !claim.predicate || !claim.object) continue;
       store.addClaim({
         id: stableId("claim", chunk.id, claim.subject, claim.predicate, claim.object, String(ci)),
         source_chunk_id: chunk.id,
