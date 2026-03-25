@@ -226,13 +226,15 @@ export async function runSimulation(opts: EngineOptions): Promise<EngineResult> 
 
       // Materialize events as posts so they enter feeds and propagation
       for (const event of activeEvents) {
-        const authorId = findEventAuthor(allActors, event);
-        if (authorId) event.actor_id = authorId;
+        const authorId = findEventAuthor(allActors, event)
+          ?? allActors[roundNum % allActors.length]?.id; // fallback to a real actor if archetype not found
+        if (!authorId) continue; // skip event if no actors at all
+        event.actor_id = authorId;
         const postId = stableId("event", runId, event.type, String(roundNum), event.content.slice(0, 20));
         const eventPost: Post = {
           id: postId,
           run_id: runId,
-          author_id: authorId ?? "system",
+          author_id: authorId,
           content: event.content,
           round_num: roundNum,
           sim_timestamp: simTimestamp,
