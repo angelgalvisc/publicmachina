@@ -133,10 +133,15 @@ One file. Open it with `sqlite3`.
 - **Run safety**: stop cleanly, keep partial results, cap operator spend, and avoid overlapping runs inside one workspace.
 - **Social dynamics**: feed ranking, echo chambers, mutes, blocks, reports, narrative fatigue, and out-of-network exposure.
 - **Event injection**: drop in shocks mid-simulation, from policy changes to viral moments.
+- **Narrative fatigue**: topics lose salience over time and can reactivate on new stimulus, preventing circular conversations.
+- **Time acceleration**: idle rounds are fast-forwarded automatically when no meaningful action occurs, keeping long simulations efficient.
+- **Platform moderation**: report thresholds, shadow-banning, and content flagging simulate real platform enforcement dynamics.
 - **Actor interviews**: ask an agent why it changed its mind after the run ends.
 - **Investigative reports**: a ReACT-style agent iteratively queries the simulation, interviews actors, and produces analytical reports.
+- **Natural-language SQL**: ask questions about the simulation in plain English and get structured answers from the database.
 - **Round evaluator**: independent quality scoring after each round with corrective guidance injected into the next round's prompts (Generator-Evaluator pattern).
 - **Resilient execution**: LLM call retries with exponential backoff, idle fallback, JSON repair, and failure diagnostics persisted in SQLite.
+- **Provider role overrides**: use different models for different tasks — a cheap model for background actors, a powerful one for analysis, another for the operator.
 - **Portable actors**: export evolved agents with beliefs, memories, and decision traces, then import them into another run.
 - **Single-file audit trail**: runs, rounds, posts, search cache, telemetry, and reports all anchor back to SQLite.
 
