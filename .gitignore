@@ -37,6 +37,7 @@ npm-debug.log*
 
 # Internal plans (working docs, not public documentation)
 PLAN-OPERATOR-HARDENING.md
+PLAN_SIMULATION_QUALITY.md
 PLAN_REFACTOR_AGENT.md
 
 # Output directory (simulation results)
