@@ -477,16 +477,33 @@ function resolveSourceName(obj: Record<string, unknown>): string | undefined {
   return undefined;
 }
 
-function composeQuery(topic: string, actor: ActorRow, feedTopPost?: string): string {
+/**
+ * Compose a clean search query from a topic + optional feed context.
+ * Keep queries short and focused — search engines perform worse with
+ * long multi-concept queries. Do NOT include profession, region, or
+ * actor metadata in the query (those pollute search results with
+ * irrelevant geographic/occupational noise).
+ */
+function composeQuery(topic: string, _actor: ActorRow, feedTopPost?: string): string {
   const parts = [topic.trim()];
-  if (actor.profession) {
-    parts.push(actor.profession.split(" ").slice(0, 2).join(" "));
-  }
+  // Add 1-2 contextual keywords from the top feed post (if relevant)
   if (feedTopPost) {
-    const words = feedTopPost.split(/\s+/).filter(w => w.length > 4).slice(0, 2);
-    if (words.length > 0) parts.push(words.join(" "));
+    // Extract meaningful keywords (>5 chars, no common words)
+    const stopwords = new Set(["about", "their", "would", "could", "should", "being", "which", "there", "these", "those", "after", "before", "while", "where", "other"]);
+    const words = feedTopPost
+      .split(/\s+/)
+      .map(w => w.replace(/[^a-zA-Z0-9]/g, ""))
+      .filter(w => w.length > 5 && !stopwords.has(w.toLowerCase()));
+    // Take up to 2 unique keywords not already in the topic
+    const topicLower = topic.toLowerCase();
+    const added: string[] = [];
+    for (const w of words) {
+      if (added.length >= 2) break;
+      if (topicLower.includes(w.toLowerCase())) continue;
+      added.push(w);
+    }
+    if (added.length > 0) parts.push(added.join(" "));
   }
-  if (actor.region) parts.push(actor.region.trim());
   return parts.filter(Boolean).join(" ");
 }
 

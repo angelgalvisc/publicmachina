@@ -46,21 +46,53 @@ type RuntimeClient =
       config: ProviderConfig;
     };
 
+/**
+ * Model pricing per 1M tokens (USD).
+ * Source: https://developers.openai.com/api/docs/pricing (March 2026)
+ * Anthropic: https://docs.anthropic.com/en/docs/about-claude/pricing
+ * Update this table when new models or pricing changes are announced.
+ */
 const COST_PER_MILLION: Record<string, { input: number; output: number }> = {
+  // Anthropic (current as of March 2026)
   "claude-opus-4-6": { input: 15.0, output: 75.0 },
   "claude-sonnet-4-6": { input: 3.0, output: 15.0 },
   "claude-haiku-4-5": { input: 0.8, output: 4.0 },
-  "gpt-5.4": { input: 5.0, output: 15.0 },
-  "gpt-5.4-2026-03-05": { input: 5.0, output: 15.0 },
-  "gpt-5-mini": { input: 0.6, output: 2.4 },
-  "gpt-5-mini-2025-08-07": { input: 0.6, output: 2.4 },
-  "gpt-5-nano": { input: 0.15, output: 0.6 },
-  "gpt-5-nano-2025-08-07": { input: 0.15, output: 0.6 },
+
+  // OpenAI — GPT-5.4 family (current as of March 2026)
+  "gpt-5.4": { input: 2.5, output: 15.0 },
+  "gpt-5.4-mini": { input: 0.75, output: 4.5 },
+  "gpt-5.4-nano": { input: 0.2, output: 1.25 },
+  "gpt-5.4-pro": { input: 30.0, output: 180.0 },
+
+  // OpenAI — GPT-5.3 family
+  "gpt-5.3-chat-latest": { input: 1.75, output: 14.0 },
+  "gpt-5.3-codex": { input: 1.75, output: 14.0 },
+
+  // OpenAI — dated variants (map to same pricing)
+  "gpt-5.4-2026-03-05": { input: 2.5, output: 15.0 },
+  "gpt-5.4-nano-2026-03-17": { input: 0.2, output: 1.25 },
+  "gpt-5.4-mini-2026-03-17": { input: 0.75, output: 4.5 },
+
+  // OpenAI — legacy (still usable via API)
+  "gpt-4o": { input: 2.5, output: 10.0 },
+  "gpt-4o-mini": { input: 0.15, output: 0.6 },
+  "gpt-4.1": { input: 2.0, output: 8.0 },
+  "gpt-4.1-mini": { input: 0.4, output: 1.6 },
+  "gpt-4.1-nano": { input: 0.1, output: 0.4 },
+
+  // OpenAI — reasoning
+  "o3": { input: 10.0, output: 40.0 },
+  "o3-mini": { input: 1.1, output: 4.4 },
+  "o4-mini": { input: 1.1, output: 4.4 },
+
+  // Moonshot AI
   "moonshot/kimi-k2.5": { input: 1.0, output: 4.0 },
   "kimi-k2.5": { input: 1.0, output: 4.0 },
   "kimi-k2-thinking": { input: 1.0, output: 4.0 },
   "kimi-k2-thinking-turbo": { input: 0.6, output: 2.4 },
-  default: { input: 3.0, output: 15.0 },
+
+  // Fallback for unknown models
+  default: { input: 1.0, output: 4.0 },
 };
 
 export function estimateModelCost(model: string, inputTokens: number, outputTokens: number): number {

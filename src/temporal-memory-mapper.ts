@@ -275,7 +275,38 @@ function mapActionToEpisodes(
       });
       break;
 
-    // idle, like, unlike, quote, delete, report, search — no temporal episode for now
+    case "quote":
+      episodes.push({
+        id: randomUUID(),
+        run_id: runId,
+        round_num: roundNum,
+        episode_type: "quote_created",
+        actor_id: actorId,
+        actor_name: actorName,
+        target_actor_id: d.target,
+        content: d.content ?? `Quoted post ${d.target}`,
+        topic: action.actorTopics[0],
+        metadata: { reasoning: d.reasoning },
+        created_at: timestamp,
+      });
+      // Also register the opinion expressed in the quote
+      if (d.content) {
+        episodes.push({
+          id: randomUUID(),
+          run_id: runId,
+          round_num: roundNum,
+          episode_type: "opinion_expressed",
+          actor_id: actorId,
+          actor_name: actorName,
+          content: d.content.slice(0, 280),
+          topic: action.actorTopics[0],
+          metadata: { via: "quote", target: d.target },
+          created_at: timestamp,
+        });
+      }
+      break;
+
+    // idle, like, unlike, delete, report, search — no temporal episode
     default:
       break;
   }

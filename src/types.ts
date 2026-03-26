@@ -616,6 +616,7 @@ export type TemporalEpisodeType =
   | "opinion_expressed"
   | "post_created"
   | "comment_created"
+  | "quote_created"
   | "repost_created"
   | "follow_changed"
   | "mute_changed"

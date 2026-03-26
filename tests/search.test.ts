@@ -137,7 +137,8 @@ describe("search.ts", () => {
 
     expect(queries.length).toBeGreaterThan(0);
     expect(queries[0]).toContain("tax");
-    expect(queries[0]).toContain("Bogota");
+    // Region is no longer included in queries (pollutes search results)
+    // Instead, queries use topic + contextual feed keywords
   });
 
   it("formats search results into web context", () => {
