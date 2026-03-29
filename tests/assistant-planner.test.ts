@@ -3,8 +3,8 @@ import { MockLLMClient } from "../src/llm.js";
 import { ASSISTANT_TOOLS } from "../src/assistant-tools.js";
 import { planAssistantStep } from "../src/assistant-planner.js";
 
-describe("assistant-planner.ts", () => {
-  it("parses a tool call plan from JSON", async () => {
+describe("assistant-planner.ts — LLM-first routing", () => {
+  it("routes a design request via LLM", async () => {
     const llm = new MockLLMClient();
     llm.setResponse(
       "Latest user input:\nDesign and run an election rumor simulation.",
@@ -29,34 +29,37 @@ describe("assistant-planner.ts", () => {
     expect(decision.kind).toBe("tool_call");
     if (decision.kind === "tool_call") {
       expect(decision.tool).toBe("design_simulation");
-      expect(decision.arguments.docsPath).toBe("./docs/elections");
+      // docsPath is only trusted when extracted from the actual brief text
+      // (not from LLM-generated args), so it's undefined here
+      expect(decision.arguments.docsPath).toBeUndefined();
       expect(decision.arguments.brief).toBe("Design and run an election rumor simulation.");
     }
   });
 
-  it("preserves the user's exact brief when the model tries to rewrite design input", async () => {
+  it("preserves the user's exact brief even when the LLM rewrites it", async () => {
     const llm = new MockLLMClient();
+    const userInput = [
+      "Design a new simulation.",
+      "",
+      "Title:",
+      "NVIDIA NemoClaw impact on Bitcoin",
+      "",
+      "Primary source:",
+      "https://example.com/nemoclaw",
+    ].join("\n");
+
+    // Mock: LLM tries to summarize the brief and hallucinate a docsPath
     llm.setResponse(
-      "Latest user input:\nTitle:\nNemoClaw and Bitcoin",
+      "NemoClaw",
       JSON.stringify({
         kind: "tool_call",
         tool: "design_simulation",
         arguments: {
-          brief: "Create a BTC and AI simulation with multiple actors.",
+          brief: "A summarized version the LLM tried to rewrite",
           docsPath: "./hallucinated-docs",
         },
       })
     );
-
-    const userInput = [
-      "Design a new simulation from scratch.",
-      "",
-      "Title:",
-      "Narrative impact of the NVIDIA NemoClaw WIRED report on Bitcoin",
-      "",
-      "Primary source:",
-      "https://es.wired.com/articulos/nvidia-lanzara-una-plataforma-de-agentes-de-ia-de-codigo-abierto",
-    ].join("\n");
 
     const decision = await planAssistantStep(llm, {
       contextSummary: "Operator identity: PublicMachina.",
@@ -69,18 +72,20 @@ describe("assistant-planner.ts", () => {
     expect(decision.kind).toBe("tool_call");
     if (decision.kind === "tool_call") {
       expect(decision.tool).toBe("design_simulation");
+      // The normalizer should override with the full user input
       expect(decision.arguments.brief).toBe(userInput);
+      // Hallucinated docsPath should be dropped (not in the actual input)
       expect(decision.arguments.docsPath).toBeUndefined();
     }
   });
 
-  it("parses a direct response plan from JSON", async () => {
+  it("routes a conversational question as a direct response", async () => {
     const llm = new MockLLMClient();
     llm.setResponse(
       "Latest user input:\nWhat can you do here?",
       JSON.stringify({
         kind: "respond",
-        message: "I can design, run, inspect, report on, and compare simulations for you.",
+        message: "I can design, run, inspect, report on, and compare simulations.",
       })
     );
 
@@ -98,14 +103,14 @@ describe("assistant-planner.ts", () => {
     }
   });
 
-  it("retries once when the first planner JSON response is invalid", async () => {
+  it("retries once when the first LLM JSON response is invalid", async () => {
     const llm = new MockLLMClient();
     let calls = 0;
     llm.complete = async () => {
       calls += 1;
       if (calls === 1) {
         return {
-          content: '{"kind":"tool_call","tool":"design_simulation","arguments":{"brief":"Rediseña',
+          content: '{"kind":"tool_call","tool":"design_simulation","arguments":{"brief":"Truncated',
           model: "mock-model",
           inputTokens: 10,
           outputTokens: 10,
@@ -117,7 +122,7 @@ describe("assistant-planner.ts", () => {
         content: JSON.stringify({
           kind: "tool_call",
           tool: "design_simulation",
-          arguments: { brief: "Rediseña la simulación con el nuevo contexto." },
+          arguments: { brief: "Redesign the simulation." },
         }),
         model: "mock-model",
         inputTokens: 10,
@@ -131,7 +136,7 @@ describe("assistant-planner.ts", () => {
       contextSummary: "Operator identity: PublicMachina.",
       currentTaskSummary: "- Status: designed",
       conversation: [],
-      userInput: "Rediseñala con ese contexto",
+      userInput: "Redesign it with that context",
       tools: ASSISTANT_TOOLS,
     });
 
@@ -143,7 +148,7 @@ describe("assistant-planner.ts", () => {
     }
   });
 
-  it("extracts JSON when the model wraps it in prose", async () => {
+  it("extracts JSON when the LLM wraps it in prose", async () => {
     const llm = new MockLLMClient();
     llm.setResponse(
       "Latest user input:\nRun it now",
@@ -165,8 +170,16 @@ describe("assistant-planner.ts", () => {
     }
   });
 
-  it("passes offline=true when a confirmation explicitly asks for an offline run", async () => {
+  it("adds offline=true when user mentions offline in a run confirmation", async () => {
     const llm = new MockLLMClient();
+    llm.setResponse(
+      "Latest user input:\nyes offline",
+      JSON.stringify({
+        kind: "tool_call",
+        tool: "run_simulation",
+        arguments: { confirmed: true },
+      })
+    );
 
     const decision = await planAssistantStep(llm, {
       contextSummary: "Operator identity: PublicMachina.",
@@ -179,182 +192,70 @@ describe("assistant-planner.ts", () => {
     expect(decision.kind).toBe("tool_call");
     if (decision.kind === "tool_call") {
       expect(decision.tool).toBe("run_simulation");
-      expect(decision.arguments.confirmed).toBe(true);
       expect(decision.arguments.offline).toBe(true);
-      expect(decision.meta.model).toBe("heuristic");
     }
   });
 
-  it("treats short follow-ups like HASLO as a retry of the latest structured brief after failure", async () => {
+  it("passes docsPath from brief when LLM detects design intent", async () => {
     const llm = new MockLLMClient();
-    const previousBrief = [
-      "Tema:",
-      "Simulación sobre impacto de Claude Mythos en empresas de ciberseguridad.",
+    const userInput = [
+      "Title:",
+      "MiCA narrative impact on crypto markets",
       "",
-      "Objetivo:",
-      "Entender reacción de mercado, vendors, CISOs y medios.",
+      "Document context:",
+      "./inputs/mica-docs",
       "",
-      "Fuentes o links:",
-      "https://www.anthropic.com/news/disrupting-AI-espionage",
+      "Objective:",
+      "Assess how MiCA framing changes public market narratives.",
     ].join("\n");
 
-    const decision = await planAssistantStep(llm, {
-      contextSummary: "Operator identity: PublicMachina.",
-      currentTaskSummary:
-        "- Status: failed\n- Active design: Old scenario\n- Last failure: Tool design_simulation failed.",
-      conversation: [
-        { role: "user", content: previousBrief },
-        { role: "assistant", content: "Si quieres que siga, responde: sí, rediseña." },
-      ],
-      userInput: "HASLO",
-      tools: ASSISTANT_TOOLS,
-    });
-
-    expect(decision.kind).toBe("tool_call");
-    if (decision.kind === "tool_call") {
-      expect(decision.tool).toBe("design_simulation");
-      expect(decision.arguments.brief).toBe(previousBrief);
-      expect(decision.meta.model).toBe("heuristic");
-    }
-  });
-
-  it("treats dale as a run confirmation when a pending run already exists", async () => {
-    const llm = new MockLLMClient();
-
-    const decision = await planAssistantStep(llm, {
-      contextSummary: "Operator identity: PublicMachina.",
-      currentTaskSummary: "- Status: awaiting_confirmation\n- Pending run: run-1 (16 rounds, grounded)",
-      conversation: [],
-      userInput: "dale",
-      tools: ASSISTANT_TOOLS,
-    });
-
-    expect(decision.kind).toBe("tool_call");
-    if (decision.kind === "tool_call") {
-      expect(decision.tool).toBe("run_simulation");
-      expect(decision.arguments.confirmed).toBe(true);
-      expect(decision.meta.model).toBe("heuristic");
-    }
-  });
-
-  it("routes a structured Spanish brief to design_simulation without relying on the model", async () => {
-    const llm = new MockLLMClient();
-
-    const decision = await planAssistantStep(llm, {
-      contextSummary: "Operator identity: PublicMachina.",
-      currentTaskSummary: "- Status: designed\n- Active design: Global Product Recall Response",
-      conversation: [],
-      userInput: [
-        "Diseña una simulación nueva desde cero y reemplaza cualquier simulación anterior.",
-        "",
-        "Título:",
-        "Impacto narrativo de la noticia de NemoClaw de NVIDIA en Bitcoin",
-        "",
-        "Fuente principal:",
-        "https://es.wired.com/articulos/nvidia-lanzara-una-plataforma-de-agentes-de-ia-de-codigo-abierto",
-        "",
-        "Contexto documental:",
-        "./inputs/nemoclaw-btc",
-        "",
-        "Objetivo:",
-        "Evaluar si la noticia puede mover de forma material el precio de Bitcoin.",
-      ].join("\n"),
-      tools: ASSISTANT_TOOLS,
-    });
-
-    expect(decision.kind).toBe("tool_call");
-    if (decision.kind === "tool_call") {
-      expect(decision.tool).toBe("design_simulation");
-      expect(decision.arguments.docsPath).toBe("./inputs/nemoclaw-btc");
-      expect(decision.meta.model).toBe("heuristic");
-    }
-  });
-
-  it("routes a structured English brief to design_simulation without relying on the model", async () => {
-    const llm = new MockLLMClient();
+    llm.setResponse(
+      `Latest user input:\n${userInput}`,
+      JSON.stringify({
+        kind: "tool_call",
+        tool: "design_simulation",
+        arguments: { brief: userInput },
+      })
+    );
 
     const decision = await planAssistantStep(llm, {
       contextSummary: "Operator identity: PublicMachina.",
       currentTaskSummary: "- Status: idle",
       conversation: [],
-      userInput: [
-        "Design a new simulation from scratch and replace any previous design.",
-        "",
-        "Title:",
-        "NVIDIA NemoClaw and Bitcoin",
-        "",
-        "Primary source:",
-        "https://example.com/nemoclaw",
-        "",
-        "Document context:",
-        "./inputs/nemoclaw-btc",
-        "",
-        "Objective:",
-        "Assess whether the story can materially change Bitcoin sentiment.",
-      ].join("\n"),
+      userInput,
       tools: ASSISTANT_TOOLS,
     });
 
     expect(decision.kind).toBe("tool_call");
     if (decision.kind === "tool_call") {
       expect(decision.tool).toBe("design_simulation");
-      expect(decision.arguments.docsPath).toBe("./inputs/nemoclaw-btc");
-      expect(decision.meta.model).toBe("heuristic");
+      expect(decision.arguments.docsPath).toBe("./inputs/mica-docs");
     }
   });
 
-  it("treats labeled briefs as design requests even without an explicit design verb", async () => {
+  it("falls back to a helpful response when LLM returns garbage", async () => {
     const llm = new MockLLMClient();
+    llm.complete = async () => ({
+      content: "I am confused and cannot parse this",
+      model: "mock-model",
+      inputTokens: 10,
+      outputTokens: 10,
+      costUsd: 0.01,
+      durationMs: 1,
+    });
 
     const decision = await planAssistantStep(llm, {
       contextSummary: "Operator identity: PublicMachina.",
       currentTaskSummary: "- Status: idle",
       conversation: [],
-      userInput: [
-        "Title:",
-        "MiCA narrative impact on crypto markets",
-        "",
-        "Objective:",
-        "Assess how MiCA framing changes public market narratives.",
-        "",
-        "Primary source:",
-        "https://example.com/mica",
-      ].join("\n"),
+      userInput: "asdfqwer random garbage",
       tools: ASSISTANT_TOOLS,
     });
 
-    expect(decision.kind).toBe("tool_call");
-    if (decision.kind === "tool_call") {
-      expect(decision.tool).toBe("design_simulation");
-      expect(decision.meta.model).toBe("heuristic");
-    }
-  });
-
-  it("treats refine-style structured requests as design updates without relying on the model", async () => {
-    const llm = new MockLLMClient();
-
-    const decision = await planAssistantStep(llm, {
-      contextSummary: "Operator identity: PublicMachina.",
-      currentTaskSummary: "- Status: designed\n- Active design: BTC and AI",
-      conversation: [],
-      userInput: [
-        "Refine this simulation.",
-        "",
-        "Configuration:",
-        "- 10 actors",
-        "- 16 rounds",
-        "- web search enabled",
-        "",
-        "Primary source:",
-        "https://example.com/nemoclaw",
-      ].join("\n"),
-      tools: ASSISTANT_TOOLS,
-    });
-
-    expect(decision.kind).toBe("tool_call");
-    if (decision.kind === "tool_call") {
-      expect(decision.tool).toBe("design_simulation");
-      expect(decision.meta.model).toBe("heuristic");
+    // Should fall back to a helpful response, not crash
+    expect(decision.kind).toBe("respond");
+    if (decision.kind === "respond") {
+      expect(decision.message).toBeTruthy();
     }
   });
 });

@@ -1,10 +1,17 @@
 /**
- * assistant-planner.ts — LLM planning loop for the PublicMachina operator.
+ * assistant-planner.ts — LLM-first planning loop for the PublicMachina operator.
+ *
+ * Architecture: ALL routing decisions are made by the LLM. No regex heuristics,
+ * no hardcoded keywords, no language-specific pattern matching. The LLM receives
+ * the user input, current state, and available tools, and returns a structured
+ * JSON decision. This makes the planner language-agnostic and robust to phrasing
+ * variations, colloquialisms, and typos.
+ *
+ * Reference: PLAN_PRODUCT_EVOLUTION.md, Anthropic harness design patterns (2025)
  */
 
 import type { LLMClient, LLMResponse } from "./llm.js";
 import type { AssistantToolDefinition, AssistantToolName } from "./assistant-tools.js";
-import { prefersOfflineMode } from "./grounding.js";
 
 export type AssistantPlannerDecision =
   | {
@@ -42,17 +49,16 @@ export interface AssistantPlannerMeta {
   model: string;
 }
 
+/**
+ * LLM-first planning step. The LLM decides whether to respond directly
+ * or call a tool based on the full context. No regex fallbacks.
+ */
 export async function planAssistantStep(
   llm: LLMClient,
   input: AssistantPlannerInput
 ): Promise<AssistantPlannerDecision> {
-  const heuristic = detectHeuristicPlannerDecision(input);
-  if (heuristic) {
-    return heuristic;
-  }
-
   const prompt = buildPlannerPrompt(input);
-  const system = buildPlannerSystemPrompt();
+  const system = buildPlannerSystemPrompt(input);
   const attempts: AssistantPlannerMeta[] = [];
   const initial = await requestPlannerJson(llm, prompt, system, 800);
   attempts.push(initial.meta);
@@ -87,25 +93,78 @@ function buildPlannerPrompt(input: AssistantPlannerInput): string {
       ? `Tool trace so far:\n${input.toolTrace.join("\n")}\n`
       : "",
     `Latest user input:\n${input.userInput.trim()}`,
-    "",
-    "Available tools:",
-    renderTools(input.tools),
   ]
     .filter(Boolean)
     .join("\n");
 }
 
-function buildPlannerSystemPrompt(): string {
+function buildPlannerSystemPrompt(input: AssistantPlannerInput): string {
+  const toolList = input.tools.map((t) => t.name).join(", ");
+
   return [
     "You are PublicMachina, an operator assistant for public narrative simulations.",
-    "You can either answer directly or choose exactly one tool call per step.",
-    "Use tools when the user is asking you to design, run, inspect, report, export, query, interview, review history, or switch providers/models.",
-    "Do not call run_simulation unless the user is asking to run a simulation or confirming a run.",
-    "If a recent design attempt failed and the user asks to continue, retry, preview, or proceed, prefer design_simulation using the latest structured brief instead of falling back to stale active state.",
-    "Do not invent file paths, actor names, or run IDs when the current task state already has them.",
-    "If the user is making a conversational or strategic request, answer directly.",
-    "Return JSON only.",
-    'JSON schema: {"kind":"respond","message":"..."} or {"kind":"tool_call","tool":"...","arguments":{...}}',
+    "You understand any language the user writes in. You are language-agnostic.",
+    "",
+    "## Your decision",
+    "Read the user's input, the current task state, and the conversation history.",
+    "Decide: respond directly OR call exactly one tool.",
+    "",
+    "## When to call a tool",
+    "",
+    "design_simulation:",
+    "  - The user provides a simulation brief, scenario description, or structured spec",
+    "  - The user asks to design, create, set up, or prepare a simulation",
+    "  - The user pastes URLs, documents, or a long structured text (this IS the brief)",
+    "  - The user asks to retry or redesign after a failure — find the most recent brief in the conversation and re-use it",
+    "  - Pass the user's FULL text as the 'brief' argument. Do NOT summarize or truncate it.",
+    "  - If the text mentions a documents path, include it as 'docsPath'",
+    "",
+    "run_simulation:",
+    "  - The user confirms they want to run (yes, confirm, go ahead, do it, dale, hazlo, etc.)",
+    "  - ONLY when the current task state shows 'awaiting_confirmation' or 'Pending run'",
+    "  - If the user says 'offline' or 'sin búsqueda', set offline: true",
+    "",
+    "stop_simulation:",
+    "  - The user asks to stop, cancel, or abort a running simulation",
+    "",
+    "query_simulation:",
+    "  - The user asks a question about simulation results, data, or metrics",
+    "",
+    "interview_actor:",
+    "  - The user wants to talk to or interview a specific actor from the simulation",
+    "",
+    "generate_report:",
+    "  - The user asks for a report, summary, or analysis of simulation results",
+    "",
+    "investigate_simulation:",
+    "  - The user asks for a deep investigation or ReACT-style analysis of simulation dynamics",
+    "",
+    "list_history:",
+    "  - The user asks about previous simulations, history, or past runs",
+    "",
+    "export_agent:",
+    "  - The user asks to export simulation data (CKP bundle, JSON, etc.)",
+    "",
+    "switch_provider:",
+    "  - The user asks to change the LLM model or provider",
+    "",
+    "## When to respond directly",
+    "  - The user asks a conversational, strategic, or informational question",
+    "  - The user asks about PublicMachina itself (capabilities, architecture, etc.)",
+    "  - You need more information before you can act",
+    "",
+    "## Critical rules",
+    "  - Do NOT call run_simulation unless the task state shows a pending run awaiting confirmation",
+    "  - Do NOT invent file paths, actor names, or run IDs — use what the task state provides",
+    "  - When the user provides a long structured text and no explicit command, it IS a design brief → call design_simulation",
+    "  - If a previous design failed and the user says 'retry' or 'try again', find the brief from conversation history and call design_simulation with it",
+    "",
+    `Available tools: ${toolList}`,
+    "",
+    "## Response format",
+    "Return JSON only. No markdown fences, no commentary, no explanation outside the JSON.",
+    '{"kind":"respond","message":"your response text"}',
+    '{"kind":"tool_call","tool":"tool_name","arguments":{"key":"value"}}',
   ].join("\n");
 }
 
@@ -113,7 +172,7 @@ function buildRepairSystemPrompt(): string {
   return [
     "You repair planner outputs for PublicMachina.",
     "Return valid JSON only.",
-    'Target schema: {"kind":"respond","message":"..."} or {"kind":"tool_call","tool":"...","arguments":{...}}',
+    '{"kind":"respond","message":"..."} or {"kind":"tool_call","tool":"...","arguments":{...}}',
     "If the source output is truncated, infer the smallest valid JSON that preserves the original intent.",
     "Do not include markdown fences or commentary.",
   ].join("\n");
@@ -198,20 +257,21 @@ function normalizePlannerToolArguments(
   input: AssistantPlannerInput
 ): Record<string, unknown> {
   if (tool === "run_simulation") {
-    return prefersOfflineMode(input.userInput)
-      ? {
-          ...args,
-          offline: true,
-        }
+    const offlineSignals = /\boffline\b|\bsin\s+b[uú]squeda\b|\bno\s+search\b/i;
+    return offlineSignals.test(input.userInput)
+      ? { ...args, offline: true }
       : args;
   }
 
   if (tool !== "design_simulation") return args;
 
+  // ALWAYS use the full user input as the brief — never let the LLM
+  // summarize, rewrite, or truncate the user's brief
   const brief = input.userInput.trim();
-  const docsPath =
-    extractDocsPath(brief) ??
-    (typeof args.docsPath === "string" && args.docsPath.trim() ? args.docsPath.trim() : null);
+
+  // Only trust docsPath extracted from the actual user input — never from
+  // the LLM's response, which may hallucinate paths
+  const docsPath = extractDocsPath(brief);
 
   const normalizedArgs: Record<string, unknown> = {
     ...args,
@@ -258,102 +318,10 @@ function parsePlannerJson(raw: string): PlannerJson | null {
   return null;
 }
 
-function detectHeuristicPlannerDecision(
-  input: AssistantPlannerInput
-): AssistantPlannerDecision | null {
-  const normalized = input.userInput.trim();
-  if (!normalized) return null;
-
-  const lower = normalized.toLowerCase();
-  const recentBrief = findRecentDesignBrief(input.conversation);
-  const hasPendingRun = /\b(Status:\s*awaiting_confirmation|Pending run:)\b/i.test(input.currentTaskSummary);
-  const looksLikeDesignRequest =
-    /\b(diseña|diseñala|diseñalo|rediseña|rediseñala|refina|ajusta|actualiza|modifica|design|redesign|refine|adjust|tighten|update|create a simulation)\b/i.test(
-      normalized
-    ) ||
-    (/\breemplaza\b/i.test(normalized) && /\bsimulaci[oó]n\b/i.test(normalized));
-
-  const hasLabeledBrief =
-    /(^|\n)\s*(t[ií]tulo|title|objetivo|objective|evento inicial|initial event|regla cr[ií]tica|critical rule|actores clave|key actors|configuraci[oó]n|configuration|fecha focal|focal date|tipo de simulaci[oó]n|simulation type|quiero observar|observation targets|fuente principal|primary source)\s*:/i.test(
-      normalized
-    );
-  const hasStructuredBrief =
-    hasLabeledBrief ||
-    (normalized.includes("http://") || normalized.includes("https://")) ||
-    normalized.length >= 500;
-
-  if ((looksLikeDesignRequest && hasStructuredBrief) || hasLabeledBrief) {
-    return {
-      kind: "tool_call",
-      tool: "design_simulation",
-      arguments: {
-        brief: normalized,
-        ...(extractDocsPath(normalized) ? { docsPath: extractDocsPath(normalized) } : {}),
-      },
-      meta: {
-        costUsd: 0,
-        inputTokens: 0,
-        outputTokens: 0,
-        model: "heuristic",
-      },
-    };
-  }
-
-  const looksLikeRunRequest =
-    /\b(correr|ejec[uú]tala|ejecutala|run it|run now|ejec[uú]talo|confirmed?|confirmo|hazlo|haslo|dale|adelante|procede|proceed|go ahead|do it)\b/i.test(
-      lower
-    ) ||
-    /^(y|yes|sí|si|run|confirm)(\s+offline)?$/i.test(normalized);
-  if (looksLikeRunRequest && hasPendingRun) {
-    const offline = prefersOfflineMode(normalized);
-    return {
-      kind: "tool_call",
-      tool: "run_simulation",
-      arguments: {
-        confirmed: true,
-        ...(offline ? { offline: true } : {}),
-      },
-      meta: {
-        costUsd: 0,
-        inputTokens: 0,
-        outputTokens: 0,
-        model: "heuristic",
-      },
-    };
-  }
-
-  const looksLikeDesignContinuation =
-    /^(hazlo|haslo|dale|adelante|procede|contin[uú]a|continua|sigue|reintenta|reintent[aá]lo|int[eé]ntalo(?:\s+de\s+nuevo)?|try again|retry|go ahead|do it|yes redesign|s[íi],?\s*redise[nñ]a)$/i.test(
-      normalized
-    ) ||
-    (/(\bpreview\b|mu[eé]strame el preview|show me the preview)/i.test(normalized) &&
-      /\bStatus:\s*failed\b/i.test(input.currentTaskSummary)) ||
-    ((/\bcorre(?:r)?\b|\brun\b/i.test(normalized) || /\bpreview\b/i.test(normalized)) &&
-      /\bStatus:\s*failed\b/i.test(input.currentTaskSummary));
-
-  if (looksLikeDesignContinuation && recentBrief) {
-    return {
-      kind: "tool_call",
-      tool: "design_simulation",
-      arguments: {
-        brief: recentBrief,
-        ...(extractDocsPath(recentBrief) ? { docsPath: extractDocsPath(recentBrief) } : {}),
-      },
-      meta: {
-        costUsd: 0,
-        inputTokens: 0,
-        outputTokens: 0,
-        model: "heuristic",
-      },
-    };
-  }
-
-  return null;
-}
-
 function extractDocsPath(input: string): string | null {
+  // Simple extraction — matches common patterns in any language
   const match = input.match(
-    /(?:^|\n)\s*(?:contexto documental|document context|documents path|documentos fuente|docspath)\s*:\s*([^\n]+)/i
+    /(?:^|\n)\s*(?:documents?\s*path|docs?\s*path|contexto\s*documental|document\s*context|documentos?\s*fuente)\s*:\s*([^\n]+)/i
   );
   if (!match) return null;
   const candidate = match[1]?.trim();
@@ -379,17 +347,6 @@ function normalizePlannerResponse(raw: string): string {
   return text.trim();
 }
 
-function renderTools(tools: AssistantToolDefinition[]): string {
-  return tools
-    .map((tool) => {
-      const params = Object.entries(tool.parameters)
-        .map(([name, description]) => `  - ${name}: ${description}`)
-        .join("\n");
-      return `${tool.name}: ${tool.description}\n${params}`;
-    })
-    .join("\n\n");
-}
-
 function formatConversation(
   conversation: Array<{ role: "user" | "assistant"; content: string }>
 ): string {
@@ -404,28 +361,4 @@ function formatConversation(
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function findRecentDesignBrief(
-  conversation: Array<{ role: "user" | "assistant"; content: string }>
-): string | null {
-  for (let index = conversation.length - 1; index >= 0; index -= 1) {
-    const message = conversation[index];
-    if (message.role !== "user") continue;
-    const content = message.content.trim();
-    if (!content) continue;
-    if (isStructuredBriefText(content)) return content;
-  }
-  return null;
-}
-
-function isStructuredBriefText(input: string): boolean {
-  return (
-    /(^|\n)\s*(t[ií]tulo|title|objetivo|objective|evento inicial|initial event|regla cr[ií]tica|critical rule|actores clave|key actors|configuraci[oó]n|configuration|fecha focal|focal date|tipo de simulaci[oó]n|simulation type|quiero observar|observation targets|fuente principal|primary source)\s*:/i.test(
-      input
-    ) ||
-    input.includes("http://") ||
-    input.includes("https://") ||
-    input.length >= 500
-  );
 }

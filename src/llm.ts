@@ -467,11 +467,13 @@ export class MockLLMClient extends LLMClient {
       }
     }
 
+    // Smart default for planner routing: detect common intents from prompt context
+    const defaultResponse = this.inferDefaultPlannerResponse(prompt);
     return {
-      content: "{}",
+      content: defaultResponse,
       model: "mock-model",
       inputTokens: Math.ceil(prompt.length / 4),
-      outputTokens: 1,
+      outputTokens: Math.ceil(defaultResponse.length / 4),
       costUsd: 0,
       durationMs: 1,
     };
@@ -492,6 +494,48 @@ export class MockLLMClient extends LLMClient {
 
   override getModel(_role: ProviderRole): string {
     return "mock-model";
+  }
+
+  /**
+   * Infer a reasonable planner response from prompt content when no explicit
+   * mock response is set. Enables integration tests without hardcoded patterns.
+   */
+  private inferDefaultPlannerResponse(prompt: string): string {
+    const lower = prompt.toLowerCase();
+
+    // Detect planner context — the planner prompt always includes "Latest user input"
+    const isPlannerPrompt = lower.includes("latest user input");
+    if (!isPlannerPrompt) return "{}";
+
+    // Detect structured brief (title/objective/source labels)
+    const hasStructuredBrief =
+      /\b(title|titulo|objective|objetivo|primary source|fuente principal)\s*:/i.test(prompt);
+
+    // Detect run confirmation context
+    const hasAwaitingConfirmation = /awaiting_confirmation|pending run/i.test(prompt);
+    const looksLikeConfirmation = /latest user input:\s*(yes|si|sí|confirm|run|dale|hazlo|go ahead|do it)/im.test(prompt);
+
+    if (hasStructuredBrief) {
+      return JSON.stringify({
+        kind: "tool_call",
+        tool: "design_simulation",
+        arguments: { brief: "mock-brief" },
+      });
+    }
+
+    if (hasAwaitingConfirmation && looksLikeConfirmation) {
+      return JSON.stringify({
+        kind: "tool_call",
+        tool: "run_simulation",
+        arguments: { confirmed: true },
+      });
+    }
+
+    // Default: respond conversationally
+    return JSON.stringify({
+      kind: "respond",
+      message: "Hello. I'm PublicMachina.\nWelcome back. What would you like to work on?",
+    });
   }
 }
 

@@ -89,8 +89,25 @@ describe("designSimulationFromBrief", () => {
     expect(parsed.feed.embeddingWeight).toBe(0.4);
   });
 
-  it("uses a structured Spanish operator brief as authoritative input", async () => {
-    const llm = makeDesignLlm();
+  it("interprets a structured Spanish brief via LLM", async () => {
+    const llm = new MockLLMClient();
+    // Mock: LLM correctly extracts fields from the Spanish brief
+    llm.setResponse("Interpret the following simulation brief", JSON.stringify({
+      title: "Impacto narrativo de la noticia de NemoClaw de NVIDIA en Bitcoin",
+      objective: "Evaluar si la noticia puede mover el sentimiento de mercado y el precio de Bitcoin.",
+      hypothesis: "NemoClaw moves crypto sentiment temporarily.",
+      sourceUrls: ["https://es.wired.com/articulos/nvidia-lanzara-una-plataforma-de-agentes-de-ia-de-codigo-abierto"],
+      actorCount: 10,
+      rounds: 16,
+      focusActors: ["periodistas de mercados", "traders cripto spot", "traders macro"],
+      search: {
+        enabled: true,
+        enabledTiers: ["A", "B"],
+        maxActorsPerRound: 4,
+        allowProfessions: ["periodistas de mercados", "periodistas de tecnología", "traders cripto", "traders macro"],
+      },
+      feed: { embeddingEnabled: false },
+    }));
     const result = await designSimulationFromBrief(
       llm,
       [
@@ -152,8 +169,25 @@ describe("designSimulationFromBrief", () => {
     expect(parsed.search.enabledTiers).toEqual(["A", "B"]);
   });
 
-  it("uses a structured English operator brief as authoritative input", async () => {
-    const llm = makeDesignLlm();
+  it("interprets a structured English brief via LLM", async () => {
+    const llm = new MockLLMClient();
+    // Mock: LLM correctly extracts fields from the English brief
+    llm.setResponse("Interpret the following simulation brief", JSON.stringify({
+      title: "Narrative impact of NVIDIA NemoClaw coverage on Bitcoin",
+      objective: "Assess whether the reported NemoClaw launch can materially change Bitcoin sentiment.",
+      hypothesis: "NemoClaw generates temporary sentiment shift.",
+      sourceUrls: ["https://example.com/nemoclaw"],
+      actorCount: 8,
+      rounds: 12,
+      focusActors: ["macro traders", "crypto traders", "markets journalists"],
+      search: {
+        enabled: true,
+        enabledTiers: ["A", "B"],
+        maxActorsPerRound: 4,
+        allowProfessions: ["technology journalists", "markets journalists", "macro traders", "crypto traders"],
+      },
+      feed: { embeddingEnabled: false },
+    }));
     const result = await designSimulationFromBrief(
       llm,
       [
@@ -197,8 +231,33 @@ describe("designSimulationFromBrief", () => {
     ]);
   });
 
-  it("handles rich structured briefs with tiers, web search, sources, and constraints without falling back to generic defaults", async () => {
-    const llm = makeDesignLlm();
+  it("interprets a rich structured brief with tiers, search, and constraints via LLM", async () => {
+    const llm = new MockLLMClient();
+    // Mock: LLM correctly extracts all rich fields from the complex brief
+    llm.setResponse("Interpret the following simulation brief", JSON.stringify({
+      title: "Impacto de Claude Mythos en empresas de ciberseguridad",
+      objective: "Entender cómo reaccionan mercado, vendors, CISOs, investigadores y medios.",
+      hypothesis: "Es bullish para cyber pero produce rotación entre ganadores y perdedores.",
+      sourceUrls: [
+        "https://www.anthropic.com/customers/palo-alto-networks",
+        "https://www.anthropic.com/customers/trellix",
+        "https://www.anthropic.com/news/disrupting-AI-espionage",
+      ],
+      actorCount: 20,
+      rounds: 6,
+      focusActors: ["Anthropic", "Palo Alto Networks", "Trellix", "Stairwell", "CrowdStrike"],
+      search: {
+        enabled: true,
+        enabledTiers: ["A", "B"],
+        maxActorsPerRound: 6,
+        maxQueriesPerActor: 2,
+        categories: "news",
+        defaultLanguage: "en",
+        allowProfessions: ["cybersecurity analyst", "enterprise software analyst", "security journalist", "threat researcher"],
+      },
+      feed: { embeddingEnabled: false },
+      assumptions: ["Restrictions: no quiero actores inventados sin anclaje claro"],
+    }));
     const result = await designSimulationFromBrief(
       llm,
       [
