@@ -134,19 +134,30 @@ interface DesignOptions {
 
 const SUPPORTED_ARCHETYPES = new Set(["persona", "organization", "media", "institution"]);
 const STRUCTURED_BRIEF_LABELS = new Set([
+  "tema",
+  "theme",
   "título",
   "titulo",
   "title",
   "objetivo",
   "objective",
+  "detonante",
+  "trigger",
+  "pregunta central",
+  "central question",
   "fuente principal",
   "primary source",
+  "fuentes o links",
+  "sources or links",
   "source urls",
   "contexto documental",
   "document context",
   "documents path",
   "fecha focal",
   "focal date",
+  "alcance geográfico",
+  "alcance geografico",
+  "geographic scope",
   "tipo de simulación",
   "tipo de simulacion",
   "simulation type",
@@ -157,13 +168,25 @@ const STRUCTURED_BRIEF_LABELS = new Set([
   "critical rule",
   "actores clave",
   "key actors",
+  "tier a",
+  "tier b",
+  "tier c",
   "configuración",
   "configuracion",
   "configuration",
+  "búsqueda en internet",
+  "busqueda en internet",
+  "internet search",
   "quiero observar",
   "observation targets",
   "quiero como salida",
   "desired outputs",
+  "salida deseada",
+  "restricciones",
+  "constraints",
+  "narrativas en conflicto",
+  "conflicting narratives",
+  "comunidades que quiero que detectes o propongas",
   "alcance",
   "scope",
   "horizonte temporal",
@@ -386,22 +409,45 @@ function parseStructuredSimulationBrief(
 ): SimulationSpecDraft | null {
   const sections = parseLabeledSections(brief);
   const signals = [
+    sections.get("tema") ?? sections.get("theme"),
     sections.get("título") ?? sections.get("titulo") ?? sections.get("title"),
     sections.get("objetivo") ?? sections.get("objective"),
+    sections.get("detonante") ?? sections.get("trigger"),
     sections.get("evento inicial") ?? sections.get("initial event"),
     sections.get("actores clave") ?? sections.get("key actors"),
+    sections.get("búsqueda en internet") ?? sections.get("busqueda en internet") ?? sections.get("internet search"),
+    sections.get("fuentes o links") ?? sections.get("sources or links"),
     sections.get("configuración") ?? sections.get("configuracion") ?? sections.get("configuration"),
+    sections.get("salida deseada") ?? sections.get("desired outputs"),
+    sections.get("restricciones") ?? sections.get("constraints"),
   ].filter(Boolean);
 
   if (signals.length < 3) return null;
 
   const baseConfig = options.baseConfig ?? defaultConfig();
   const title = cleanStructuredValue(
-    firstLine(sections.get("título") ?? sections.get("titulo") ?? sections.get("title"))
+    firstLine(
+      sections.get("título") ??
+        sections.get("titulo") ??
+        sections.get("title") ??
+        sections.get("tema") ??
+        sections.get("theme")
+    )
   );
-  const objective = cleanStructuredValue(sections.get("objetivo") ?? sections.get("objective"));
+  const objective = cleanStructuredValue(
+    sections.get("objetivo") ??
+      sections.get("objective") ??
+      sections.get("pregunta central") ??
+      sections.get("central question")
+  );
   const eventInitial = cleanStructuredValue(
-    sections.get("evento inicial") ?? sections.get("initial event")
+    sections.get("evento inicial") ??
+      sections.get("initial event") ??
+      sections.get("detonante") ??
+      sections.get("trigger")
+  );
+  const centralQuestion = cleanStructuredValue(
+    sections.get("pregunta central") ?? sections.get("central question")
   );
   const criticalRule = cleanStructuredValue(
     sections.get("regla crítica") ?? sections.get("regla critica") ?? sections.get("critical rule")
@@ -414,40 +460,110 @@ function parseStructuredSimulationBrief(
   const dateFocal = normalizeStructuredDate(
     cleanStructuredValue(sections.get("fecha focal") ?? sections.get("focal date"))
   );
-  const focusActors = parseBulletList(sections.get("actores clave") ?? sections.get("key actors"));
+  const focusActors = Array.from(
+    new Set(
+      [
+        ...parseBulletList(sections.get("actores clave") ?? sections.get("key actors")),
+        ...parseBulletList(sections.get("tier a")),
+        ...parseBulletList(sections.get("tier b")),
+      ]
+        .map((item) => item.trim())
+        .filter(Boolean)
+    )
+  );
   const observationTargets = parseBulletList(
     sections.get("quiero observar") ?? sections.get("observation targets")
   );
   const requestedOutputs = parseBulletList(
-    sections.get("quiero como salida") ?? sections.get("desired outputs")
+    sections.get("quiero como salida") ??
+      sections.get("desired outputs") ??
+      sections.get("salida deseada")
+  );
+  const restrictions = parseBulletList(
+    sections.get("restricciones") ?? sections.get("constraints")
+  );
+  const conflictingNarratives = parseBulletList(
+    sections.get("narrativas en conflicto") ?? sections.get("conflicting narratives")
+  );
+  const communityRequests = parseBulletList(
+    sections.get("comunidades que quiero que detectes o propongas")
+  );
+  const geographicScope = cleanStructuredValue(
+    sections.get("alcance geográfico") ??
+      sections.get("alcance geografico") ??
+      sections.get("geographic scope") ??
+      sections.get("alcance") ??
+      sections.get("scope")
+  );
+  const timeHorizon = cleanStructuredValue(
+    sections.get("horizonte temporal") ?? sections.get("time horizon")
   );
   const configurationText = cleanStructuredValue(
     sections.get("configuración") ?? sections.get("configuracion") ?? sections.get("configuration")
   );
+  const searchText = cleanStructuredValue(
+    sections.get("búsqueda en internet") ??
+      sections.get("busqueda en internet") ??
+      sections.get("internet search")
+  );
   const sourceUrls = extractUrls(
     cleanStructuredValue(
-      sections.get("fuente principal") ?? sections.get("primary source") ?? sections.get("source urls")
+      sections.get("fuente principal") ??
+        sections.get("primary source") ??
+        sections.get("source urls") ??
+        sections.get("fuentes o links") ??
+        sections.get("sources or links")
     ) ?? brief
   );
 
   const rounds =
     extractRoundsFromConfiguration(configurationText) ??
-    extractRoundsFromConfiguration(
-      cleanStructuredValue(sections.get("horizonte temporal") ?? sections.get("time horizon"))
-    ) ??
+    extractRoundsFromConfiguration(timeHorizon) ??
+    extractRoundsFromConfiguration(searchText) ??
     undefined;
-  const actorCount = extractActorCountFromConfiguration(configurationText);
+  const actorCount =
+    extractActorCountFromConfiguration(configurationText) ??
+    extractActorCountFromConfiguration(
+      [
+        sections.get("actores clave"),
+        sections.get("tier a"),
+        sections.get("tier b"),
+        sections.get("tier c"),
+      ]
+        .filter(Boolean)
+        .join("\n")
+    );
 
-  const searchEnabled = /b[uú]squeda web habilitada|internet habilitada|web search enabled/i.test(
-    configurationText ?? ""
+  const combinedSearchText = [configurationText, searchText].filter(Boolean).join("\n");
+  const searchEnabled = /b[uú]squeda web habilitada|internet habilitada|web search enabled|run grounded|grounded run|search enabled/i.test(
+    combinedSearchText
   );
-  const maxActorsPerRound = extractSearchBudget(configurationText);
-  const searchAllowProfessions = extractSearchRoles(configurationText);
+  const maxActorsPerRound = extractSearchBudget(combinedSearchText);
+  const searchAllowProfessions = Array.from(
+    new Set([
+      ...extractSearchRoles(combinedSearchText),
+      ...extractIndentedBulletList(searchText, /permite\s+b[uú]squeda\s+especialmente\s+a\s+estos\s+perfiles/i),
+    ])
+  );
+  const searchDefaultLanguage =
+    extractFieldValue(searchText, /idioma de b[uú]squeda|search language/i) ??
+    inferLanguageFromBrief(brief, baseConfig.search.defaultLanguage);
+  const searchCategories =
+    extractFieldValue(searchText, /categor[ií]a|category/i) ?? baseConfig.search.categories;
+  const maxQueriesPerActor =
+    extractMaxQueriesPerActor(combinedSearchText) ?? baseConfig.search.maxQueriesPerActor;
+  const searchEnabledTiers =
+    /tier a/i.test(combinedSearchText) || /tier b/i.test(combinedSearchText)
+      ? ([
+          /tier a/i.test(combinedSearchText) ? "A" : null,
+          /tier b/i.test(combinedSearchText) ? "B" : null,
+        ].filter(Boolean) as SearchTier[])
+      : [...baseConfig.search.enabledTiers];
 
   const searchDraft = searchEnabled
     ? {
         enabled: true,
-        enabledTiers: [...baseConfig.search.enabledTiers],
+        enabledTiers: searchEnabledTiers,
         maxActorsPerRound: maxActorsPerRound ?? baseConfig.search.maxActorsPerRound,
         maxActorsByTier: splitSearchBudget(
           maxActorsPerRound ?? baseConfig.search.maxActorsPerRound
@@ -459,10 +575,10 @@ function parseStructuredSimulationBrief(
         allowActors: [],
         denyActors: [],
         cutoffDate: dateFocal ?? baseConfig.search.cutoffDate,
-        categories: baseConfig.search.categories,
-        defaultLanguage: inferLanguageFromBrief(brief, baseConfig.search.defaultLanguage),
+        categories: searchCategories,
+        defaultLanguage: searchDefaultLanguage,
         maxResultsPerQuery: baseConfig.search.maxResultsPerQuery,
-        maxQueriesPerActor: baseConfig.search.maxQueriesPerActor,
+        maxQueriesPerActor,
         strictCutoff: true,
         timeoutMs: baseConfig.search.timeoutMs,
       }
@@ -479,7 +595,7 @@ function parseStructuredSimulationBrief(
         denyActors: [],
         cutoffDate: dateFocal,
         categories: baseConfig.search.categories,
-        defaultLanguage: inferLanguageFromBrief(brief, baseConfig.search.defaultLanguage),
+        defaultLanguage: searchDefaultLanguage,
         maxResultsPerQuery: baseConfig.search.maxResultsPerQuery,
         maxQueriesPerActor: baseConfig.search.maxQueriesPerActor,
         strictCutoff: baseConfig.search.strictCutoff,
@@ -491,14 +607,26 @@ function parseStructuredSimulationBrief(
   ];
   if (criticalRule) assumptions.push(`Critical rule: ${criticalRule}`);
   if (eventInitial) assumptions.push(`Initial event: ${eventInitial}`);
+  if (centralQuestion) assumptions.push(`Central question: ${centralQuestion}`);
+  if (geographicScope) assumptions.push(`Geographic scope: ${geographicScope}`);
+  if (timeHorizon) assumptions.push(`Time horizon: ${timeHorizon}`);
   if (requestedOutputs.length > 0) {
     assumptions.push(`Expected outputs: ${requestedOutputs.join(", ")}`);
+  }
+  if (communityRequests.length > 0) {
+    assumptions.push(`Requested communities: ${communityRequests.join(", ")}`);
+  }
+  if (conflictingNarratives.length > 0) {
+    assumptions.push(`Conflicting narratives: ${conflictingNarratives.join(", ")}`);
+  }
+  if (restrictions.length > 0) {
+    assumptions.push(`Restrictions: ${restrictions.join(", ")}`);
   }
 
   return {
     title: title ?? undefined,
     objective: objective ?? undefined,
-    hypothesis: eventInitial ?? undefined,
+    hypothesis: centralQuestion ?? eventInitial ?? undefined,
     docsPath: docsPath ?? undefined,
     sourceUrls,
     actorCount,
@@ -697,6 +825,16 @@ function extractRoundsFromConfiguration(value: string | null): number | undefine
 
 function extractActorCountFromConfiguration(value: string | null): number | undefined {
   if (!value) return undefined;
+  const rangeMatch =
+    value.match(/(\d+)\s*(?:a|-|to)\s*(\d+)\s*(?:actors?|actores?|agentes?)/i) ??
+    value.match(/(?:cast|elenco)\s+de\s+aproximadamente\s+(\d+)\s*(?:a|-|to)\s*(\d+)\s*(?:actors?|actores?|agentes?)/i);
+  if (rangeMatch) {
+    const low = Number.parseInt(rangeMatch[1] ?? "", 10);
+    const high = Number.parseInt(rangeMatch[2] ?? "", 10);
+    if (Number.isFinite(low) && Number.isFinite(high)) {
+      return Math.round((low + high) / 2);
+    }
+  }
   const match = value.match(/(\d+)\s*(?:actors?|agentes?)/i);
   if (!match) return undefined;
   const actorCount = Number.parseInt(match[1] ?? "", 10);
@@ -707,6 +845,7 @@ function extractSearchBudget(value: string | null): number | undefined {
   if (!value) return undefined;
   const match =
     value.match(/m[aá]ximo\s+(\d+)\s+actores?\s+por\s+ronda\s+con\s+b[uú]squeda/i) ??
+    value.match(/m[aá]ximo\s+(\d+)\s+actores?\s+con\s+b[uú]squeda\s+por\s+ronda/i) ??
     value.match(/up\s+to\s+(\d+)\s+actors?\s+per\s+round\s+with\s+search/i);
   if (!match) return undefined;
   const budget = Number.parseInt(match[1] ?? "", 10);
@@ -727,6 +866,43 @@ function extractSearchRoles(value: string | null): string[] {
     .split(/,|\sy\s|\sand\s/gi)
     .map((entry) => entry.trim().replace(/\.$/, ""))
     .filter(Boolean);
+}
+
+function extractIndentedBulletList(value: string | null, marker: RegExp): string[] {
+  if (!value) return [];
+  const lines = value.split(/\r?\n/);
+  const start = lines.findIndex((line) => marker.test(line));
+  if (start < 0) return [];
+  const items: string[] = [];
+  for (let index = start + 1; index < lines.length; index += 1) {
+    const line = lines[index]?.trim() ?? "";
+    if (!line) {
+      if (items.length > 0) break;
+      continue;
+    }
+    if (!/^[-*]\s+/.test(line)) break;
+    items.push(line.replace(/^[-*]\s+/, "").trim());
+  }
+  return items;
+}
+
+function extractFieldValue(value: string | null, label: RegExp): string | null {
+  if (!value) return null;
+  for (const line of value.split(/\r?\n/)) {
+    const match = line.match(new RegExp(`^\\s*(?:-\\s*)?(?:${label.source})\\s*:\\s*(.+)$`, label.flags));
+    if (match?.[1]?.trim()) return match[1].trim();
+  }
+  return null;
+}
+
+function extractMaxQueriesPerActor(value: string | null): number | undefined {
+  if (!value) return undefined;
+  const match =
+    value.match(/m[aá]ximo\s+(\d+)\s+queries\s+por\s+actor/i) ??
+    value.match(/max(?:imum)?\s+(\d+)\s+queries?\s+per\s+actor/i);
+  if (!match) return undefined;
+  const parsed = Number.parseInt(match[1] ?? "", 10);
+  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 function splitSearchBudget(total: number): { A: number; B: number } {
@@ -856,6 +1032,7 @@ export async function interpretSimulationBrief(
     system,
     temperature: 0.0,
     maxTokens: 1800,
+    allowRepair: true,
   });
 
   return normalizeSimulationSpec(data ?? {}, options);

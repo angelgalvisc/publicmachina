@@ -196,6 +196,103 @@ describe("designSimulationFromBrief", () => {
       "technology journalists",
     ]);
   });
+
+  it("handles rich structured briefs with tiers, web search, sources, and constraints without falling back to generic defaults", async () => {
+    const llm = makeDesignLlm();
+    const result = await designSimulationFromBrief(
+      llm,
+      [
+        "Tema:",
+        "Impacto de Claude Mythos en empresas de ciberseguridad",
+        "",
+        "Objetivo:",
+        "Entender cómo reaccionan mercado, vendors, CISOs, investigadores y medios ante un nuevo Claude mucho más fuerte para tareas de ciberseguridad.",
+        "",
+        "Detonante:",
+        "Lanzamiento o leak altamente creíble de Claude Mythos con mejoras materiales en agentic coding, vulnerability discovery y SOC automation.",
+        "",
+        "Pregunta central:",
+        "¿Es bullish para cyber, bearish para algunos subsegmentos o produce una rotación entre ganadores y perdedores?",
+        "",
+        "Alcance geográfico:",
+        "Principalmente EE. UU., con eco global.",
+        "",
+        "Horizonte temporal:",
+        "Quiero observar reacción de corto plazo durante 48-72 horas. Diseña 6 rondas.",
+        "",
+        "Actores clave:",
+        "- Anthropic",
+        "- Palo Alto Networks",
+        "- Trellix",
+        "- Stairwell",
+        "- CrowdStrike",
+        "",
+        "Tier A:",
+        "- Anthropic como actor institucional / vocero corporativo",
+        "- Palo Alto Networks",
+        "- CrowdStrike",
+        "- periodistas top de seguridad / enterprise AI",
+        "",
+        "Tier B:",
+        "- threat researchers",
+        "- incident responders",
+        "- vulnerability researchers",
+        "- enterprise software analysts",
+        "",
+        "Búsqueda en internet:",
+        "Quiero un run grounded con búsqueda web habilitada.",
+        "Permite búsqueda a actores Tier A y Tier B.",
+        "Idioma de búsqueda: en",
+        "Categoría: news",
+        "Máximo 6 actores con búsqueda por ronda",
+        "Máximo 2 queries por actor",
+        "Permite búsqueda especialmente a estos perfiles:",
+        "- cybersecurity analyst",
+        "- threat researcher",
+        "- security journalist",
+        "- enterprise software analyst",
+        "",
+        "Fuentes o links:",
+        "https://www.anthropic.com/news/disrupting-AI-espionage",
+        "https://www.anthropic.com/customers/palo-alto-networks",
+        "https://www.anthropic.com/customers/trellix",
+        "",
+        "Salida deseada:",
+        "- preview detallado antes de correr",
+        "- actores propuestos",
+        "- comunidades",
+        "",
+        "Restricciones:",
+        "- no quiero actores inventados sin anclaje claro",
+        "- si Claude Mythos no está confirmado, dilo explícitamente como supuesto de escenario",
+      ].join("\n")
+    );
+
+    expect(result.spec.title).toContain("Claude Mythos");
+    expect(result.spec.objective).toContain("mercado");
+    expect(result.spec.hypothesis).toContain("bullish");
+    expect(result.spec.sourceUrls).toEqual([
+      "https://www.anthropic.com/customers/palo-alto-networks",
+      "https://www.anthropic.com/customers/trellix",
+      "https://www.anthropic.com/news/disrupting-AI-espionage",
+    ]);
+    expect(result.spec.rounds).toBe(6);
+    expect(result.spec.search.enabled).toBe(true);
+    expect(result.spec.search.enabledTiers).toEqual(["A", "B"]);
+    expect(result.spec.search.maxActorsPerRound).toBe(6);
+    expect(result.spec.search.maxQueriesPerActor).toBe(2);
+    expect(result.spec.search.categories).toBe("news");
+    expect(result.spec.search.defaultLanguage).toBe("en");
+    expect(result.spec.search.allowProfessions).toEqual([
+      "cybersecurity analyst",
+      "enterprise software analyst",
+      "security journalist",
+      "threat researcher",
+    ]);
+    expect(result.spec.focusActors).toContain("Anthropic");
+    expect(result.spec.focusActors).toContain("Palo Alto Networks");
+    expect(result.spec.assumptions.join("\n")).toContain("Restrictions:");
+  });
 });
 
 describe("validateSimulationSpec", () => {

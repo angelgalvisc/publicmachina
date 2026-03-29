@@ -185,6 +185,58 @@ describe("assistant-planner.ts", () => {
     }
   });
 
+  it("treats short follow-ups like HASLO as a retry of the latest structured brief after failure", async () => {
+    const llm = new MockLLMClient();
+    const previousBrief = [
+      "Tema:",
+      "Simulación sobre impacto de Claude Mythos en empresas de ciberseguridad.",
+      "",
+      "Objetivo:",
+      "Entender reacción de mercado, vendors, CISOs y medios.",
+      "",
+      "Fuentes o links:",
+      "https://www.anthropic.com/news/disrupting-AI-espionage",
+    ].join("\n");
+
+    const decision = await planAssistantStep(llm, {
+      contextSummary: "Operator identity: PublicMachina.",
+      currentTaskSummary:
+        "- Status: failed\n- Active design: Old scenario\n- Last failure: Tool design_simulation failed.",
+      conversation: [
+        { role: "user", content: previousBrief },
+        { role: "assistant", content: "Si quieres que siga, responde: sí, rediseña." },
+      ],
+      userInput: "HASLO",
+      tools: ASSISTANT_TOOLS,
+    });
+
+    expect(decision.kind).toBe("tool_call");
+    if (decision.kind === "tool_call") {
+      expect(decision.tool).toBe("design_simulation");
+      expect(decision.arguments.brief).toBe(previousBrief);
+      expect(decision.meta.model).toBe("heuristic");
+    }
+  });
+
+  it("treats dale as a run confirmation when a pending run already exists", async () => {
+    const llm = new MockLLMClient();
+
+    const decision = await planAssistantStep(llm, {
+      contextSummary: "Operator identity: PublicMachina.",
+      currentTaskSummary: "- Status: awaiting_confirmation\n- Pending run: run-1 (16 rounds, grounded)",
+      conversation: [],
+      userInput: "dale",
+      tools: ASSISTANT_TOOLS,
+    });
+
+    expect(decision.kind).toBe("tool_call");
+    if (decision.kind === "tool_call") {
+      expect(decision.tool).toBe("run_simulation");
+      expect(decision.arguments.confirmed).toBe(true);
+      expect(decision.meta.model).toBe("heuristic");
+    }
+  });
+
   it("routes a structured Spanish brief to design_simulation without relying on the model", async () => {
     const llm = new MockLLMClient();
 

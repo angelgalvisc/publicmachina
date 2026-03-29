@@ -179,58 +179,86 @@ export class LLMClient {
       temperature: options.temperature ?? 0.0,
     });
 
-    let jsonStr = response.content.trim();
-    if (jsonStr.startsWith("```json")) jsonStr = jsonStr.slice(7);
-    else if (jsonStr.startsWith("```")) jsonStr = jsonStr.slice(3);
-    if (jsonStr.endsWith("```")) jsonStr = jsonStr.slice(0, -3);
-    jsonStr = jsonStr.trim();
+    const candidates = jsonParseCandidates(response.content);
+    const primaryCandidate = candidates[0] ?? normalizeJsonResponse(response.content);
 
     let data: T;
-    try {
-      data = JSON.parse(jsonStr) as T;
-    } catch {
-      if (!options.allowRepair) {
-        throw new Error(
-          `Failed to parse LLM JSON response from ${role} (model: ${response.model}):\n${jsonStr.slice(0, 200)}`
-        );
-      }
-
-      // Mechanical repair: trailing commas, unclosed structures
-      const repaired = mechanicalJsonRepair(jsonStr);
+    for (const candidate of candidates) {
       try {
-        data = JSON.parse(repaired) as T;
+        data = JSON.parse(candidate) as T;
+        return {
+          data,
+          meta: {
+            model: response.model,
+            inputTokens: response.inputTokens,
+            outputTokens: response.outputTokens,
+            costUsd: response.costUsd,
+            durationMs: response.durationMs,
+          },
+        };
       } catch {
-        // LLM-assisted repair: ask the model to fix its own output
-        const repairResponse = await this.complete(role,
-          `The following JSON is malformed. Return ONLY valid JSON, nothing else:\n${jsonStr.slice(0, 800)}`,
-          { ...options, system: "Return only valid JSON. No explanation.", temperature: 0.0, allowRepair: undefined }
-        );
-        let repairStr = repairResponse.content.trim();
-        if (repairStr.startsWith("```json")) repairStr = repairStr.slice(7);
-        else if (repairStr.startsWith("```")) repairStr = repairStr.slice(3);
-        if (repairStr.endsWith("```")) repairStr = repairStr.slice(0, -3);
-        repairStr = repairStr.trim();
-
-        try {
-          data = JSON.parse(repairStr) as T;
-        } catch {
-          throw new Error(
-            `Failed to parse LLM JSON response from ${role} even after repair (model: ${response.model}):\n${jsonStr.slice(0, 200)}`
-          );
-        }
+        continue;
       }
     }
 
-    return {
-      data,
-      meta: {
-        model: response.model,
-        inputTokens: response.inputTokens,
-        outputTokens: response.outputTokens,
-        costUsd: response.costUsd,
-        durationMs: response.durationMs,
-      },
-    };
+    if (!options.allowRepair) {
+      throw new Error(
+        `Failed to parse LLM JSON response from ${role} (model: ${response.model}):\n${primaryCandidate.slice(0, 200)}`
+      );
+    }
+
+    for (const candidate of candidates) {
+      const repaired = mechanicalJsonRepair(candidate);
+      try {
+        data = JSON.parse(repaired) as T;
+        return {
+          data,
+          meta: {
+            model: response.model,
+            inputTokens: response.inputTokens,
+            outputTokens: response.outputTokens,
+            costUsd: response.costUsd,
+            durationMs: response.durationMs,
+          },
+        };
+      } catch {
+        continue;
+      }
+    }
+
+    // LLM-assisted repair: ask the model to fix its own output
+    const repairResponse = await this.complete(
+      role,
+      `The following JSON is malformed. Return ONLY valid JSON, nothing else:\n${primaryCandidate.slice(0, 1200)}`,
+      {
+        ...options,
+        system: "Return only valid JSON. No explanation.",
+        temperature: 0.0,
+        allowRepair: undefined,
+      }
+    );
+    const repairedCandidates = jsonParseCandidates(repairResponse.content);
+    for (const candidate of repairedCandidates) {
+      try {
+        data = JSON.parse(candidate) as T;
+        return {
+          data,
+          meta: {
+            model: response.model,
+            inputTokens: response.inputTokens,
+            outputTokens: response.outputTokens,
+            costUsd: response.costUsd,
+            durationMs: response.durationMs,
+          },
+        };
+      } catch {
+        continue;
+      }
+    }
+
+    throw new Error(
+      `Failed to parse LLM JSON response from ${role} even after repair (model: ${response.model}):\n${primaryCandidate.slice(0, 200)}`
+    );
   }
 
   async chat(
@@ -483,4 +511,31 @@ function mechanicalJsonRepair(json: string): string {
   const closeBrackets = (s.match(/]/g) ?? []).length;
   if (openBrackets > closeBrackets) s += "]".repeat(openBrackets - closeBrackets);
   return s;
+}
+
+function normalizeJsonResponse(raw: string): string {
+  let text = raw.trim();
+  if (text.startsWith("```json")) text = text.slice(7);
+  else if (text.startsWith("```")) text = text.slice(3);
+  if (text.endsWith("```")) text = text.slice(0, -3);
+  return text.trim();
+}
+
+function jsonParseCandidates(raw: string): string[] {
+  const normalized = normalizeJsonResponse(raw);
+  const candidates = [normalized];
+
+  const firstBrace = normalized.indexOf("{");
+  const lastBrace = normalized.lastIndexOf("}");
+  if (firstBrace >= 0 && lastBrace > firstBrace) {
+    candidates.push(normalized.slice(firstBrace, lastBrace + 1));
+  }
+
+  const firstBracket = normalized.indexOf("[");
+  const lastBracket = normalized.lastIndexOf("]");
+  if (firstBracket >= 0 && lastBracket > firstBracket) {
+    candidates.push(normalized.slice(firstBracket, lastBracket + 1));
+  }
+
+  return [...new Set(candidates.map((candidate) => candidate.trim()).filter(Boolean))];
 }

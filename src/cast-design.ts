@@ -137,6 +137,7 @@ export async function designCast(
       system: CAST_DESIGN_SYSTEM,
       temperature: 0.1,
       maxTokens: 2500,
+      allowRepair: true,
     });
 
     return normalizeCastDesign(data ?? {}, spec.focusActors);

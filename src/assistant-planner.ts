@@ -101,6 +101,7 @@ function buildPlannerSystemPrompt(): string {
     "You can either answer directly or choose exactly one tool call per step.",
     "Use tools when the user is asking you to design, run, inspect, report, export, query, interview, review history, or switch providers/models.",
     "Do not call run_simulation unless the user is asking to run a simulation or confirming a run.",
+    "If a recent design attempt failed and the user asks to continue, retry, preview, or proceed, prefer design_simulation using the latest structured brief instead of falling back to stale active state.",
     "Do not invent file paths, actor names, or run IDs when the current task state already has them.",
     "If the user is making a conversational or strategic request, answer directly.",
     "Return JSON only.",
@@ -264,6 +265,8 @@ function detectHeuristicPlannerDecision(
   if (!normalized) return null;
 
   const lower = normalized.toLowerCase();
+  const recentBrief = findRecentDesignBrief(input.conversation);
+  const hasPendingRun = /\b(Status:\s*awaiting_confirmation|Pending run:)\b/i.test(input.currentTaskSummary);
   const looksLikeDesignRequest =
     /\b(diseña|diseñala|diseñalo|rediseña|rediseñala|refina|ajusta|actualiza|modifica|design|redesign|refine|adjust|tighten|update|create a simulation)\b/i.test(
       normalized
@@ -297,14 +300,11 @@ function detectHeuristicPlannerDecision(
   }
 
   const looksLikeRunRequest =
-    /\b(correr|ejec[uú]tala|ejecutala|run it|run now|ejec[uú]talo|confirmed?|confirmo)\b/i.test(
+    /\b(correr|ejec[uú]tala|ejecutala|run it|run now|ejec[uú]talo|confirmed?|confirmo|hazlo|haslo|dale|adelante|procede|proceed|go ahead|do it)\b/i.test(
       lower
     ) ||
     /^(y|yes|sí|si|run|confirm)(\s+offline)?$/i.test(normalized);
-  if (
-    looksLikeRunRequest &&
-    /\b(Status:\s*awaiting_confirmation|Pending run:)\b/i.test(input.currentTaskSummary)
-  ) {
+  if (looksLikeRunRequest && hasPendingRun) {
     const offline = prefersOfflineMode(normalized);
     return {
       kind: "tool_call",
@@ -312,6 +312,32 @@ function detectHeuristicPlannerDecision(
       arguments: {
         confirmed: true,
         ...(offline ? { offline: true } : {}),
+      },
+      meta: {
+        costUsd: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        model: "heuristic",
+      },
+    };
+  }
+
+  const looksLikeDesignContinuation =
+    /^(hazlo|haslo|dale|adelante|procede|contin[uú]a|continua|sigue|reintenta|reintent[aá]lo|int[eé]ntalo(?:\s+de\s+nuevo)?|try again|retry|go ahead|do it|yes redesign|s[íi],?\s*redise[nñ]a)$/i.test(
+      normalized
+    ) ||
+    (/(\bpreview\b|mu[eé]strame el preview|show me the preview)/i.test(normalized) &&
+      /\bStatus:\s*failed\b/i.test(input.currentTaskSummary)) ||
+    ((/\bcorre(?:r)?\b|\brun\b/i.test(normalized) || /\bpreview\b/i.test(normalized)) &&
+      /\bStatus:\s*failed\b/i.test(input.currentTaskSummary));
+
+  if (looksLikeDesignContinuation && recentBrief) {
+    return {
+      kind: "tool_call",
+      tool: "design_simulation",
+      arguments: {
+        brief: recentBrief,
+        ...(extractDocsPath(recentBrief) ? { docsPath: extractDocsPath(recentBrief) } : {}),
       },
       meta: {
         costUsd: 0,
@@ -378,4 +404,28 @@ function formatConversation(
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function findRecentDesignBrief(
+  conversation: Array<{ role: "user" | "assistant"; content: string }>
+): string | null {
+  for (let index = conversation.length - 1; index >= 0; index -= 1) {
+    const message = conversation[index];
+    if (message.role !== "user") continue;
+    const content = message.content.trim();
+    if (!content) continue;
+    if (isStructuredBriefText(content)) return content;
+  }
+  return null;
+}
+
+function isStructuredBriefText(input: string): boolean {
+  return (
+    /(^|\n)\s*(t[ií]tulo|title|objetivo|objective|evento inicial|initial event|regla cr[ií]tica|critical rule|actores clave|key actors|configuraci[oó]n|configuration|fecha focal|focal date|tipo de simulaci[oó]n|simulation type|quiero observar|observation targets|fuente principal|primary source)\s*:/i.test(
+      input
+    ) ||
+    input.includes("http://") ||
+    input.includes("https://") ||
+    input.length >= 500
+  );
 }

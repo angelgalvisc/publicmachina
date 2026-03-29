@@ -66,6 +66,31 @@ describe("MockLLMClient", () => {
     expect(result.meta.model).toBe("mock-model");
   });
 
+  it("completeJSON() extracts JSON when the model wraps it in prose", async () => {
+    const mock = new MockLLMClient();
+    mock.setResponse("wrapped", 'Claro. Aquí va:\n{"entities":["Org A"]}\nFin.');
+
+    const result = await mock.completeJSON<{ entities: string[] }>(
+      "analysis",
+      "please extract wrapped entities"
+    );
+
+    expect(result.data.entities).toEqual(["Org A"]);
+  });
+
+  it("completeJSON() repairs simple malformed JSON when allowRepair=true", async () => {
+    const mock = new MockLLMClient();
+    mock.setResponse("repair", '{"entities":["Org A",],}');
+
+    const result = await mock.completeJSON<{ entities: string[] }>(
+      "analysis",
+      "please repair entities",
+      { allowRepair: true }
+    );
+
+    expect(result.data.entities).toEqual(["Org A"]);
+  });
+
   it("hasProvider() returns true for all roles", () => {
     const mock = new MockLLMClient();
     expect(mock.hasProvider("analysis")).toBe(true);
