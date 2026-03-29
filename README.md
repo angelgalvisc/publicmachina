@@ -18,7 +18,7 @@ PublicMachina builds a parallel social world from your scenario, populates it wi
 
 Every run lives in one `.db` file. You can open it with `sqlite3`, generate a report, interview actors, or export evolved agents with their memories and decision traces.
 
-PublicMachina supports three real providers today: **Anthropic**, **OpenAI**, and **Moonshot AI**.
+PublicMachina supports three real providers today: **Anthropic**, **OpenAI**, and **Moonshot AI**. Recommended default model: `gpt-5.4-nano` (~$0.03 per simulation).
 
 ## What can you simulate?
 
@@ -125,8 +125,8 @@ One file. Open it with `sqlite3`.
 ## Capabilities
 
 - **Internet-grounded agents**: Tier A and B actors can search SearXNG before deciding, with exact temporal cutoff filtering applied by PublicMachina.
-- **Natural-language design**: describe a scenario in plain English and get a validated `simulation.spec.json` plus executable config. The conversational operator adds a second pass that proposes actors and communities from downloaded source documents.
-- **Conversational operator**: the default entrypoint is a conversation, not a wall of flags.
+- **Natural-language design**: describe a scenario in any language and get a validated `simulation.spec.json` plus executable config. The conversational operator adds a second pass that proposes actors and communities from downloaded source documents. The planner is fully LLM-driven — no hardcoded keywords or regex routing.
+- **Conversational operator**: the default entrypoint is a conversation, not a wall of flags. Design, preview, confirm, and run end-to-end from the assistant CLI.
 - **Replayable alternate realities**: resume interrupted runs from snapshots or replay completed runs from scaffold + decision cache.
 - **Deterministic replay**: seedable PRNG, recorded decisions, cached web context, and persisted run scaffolds keep reruns inspectable.
 - **3-tier cognition**: use expensive reasoning only where it matters and keep background populations cheap.
@@ -140,7 +140,8 @@ One file. Open it with `sqlite3`.
 - **Investigative reports**: a ReACT-style agent iteratively queries the simulation, interviews actors, and produces analytical reports.
 - **Natural-language SQL**: ask questions about the simulation in plain English and get structured answers from the database.
 - **Round evaluator**: independent quality scoring after each round with corrective guidance injected into the next round's prompts (Generator-Evaluator pattern).
-- **Resilient execution**: LLM call retries with exponential backoff, idle fallback, JSON repair, and failure diagnostics persisted in SQLite.
+- **Resilient execution**: LLM call retries with exponential backoff, idle fallback for unrecoverable errors, optional JSON repair for malformed model output, and failure diagnostics persisted in SQLite. A single actor failure never kills the run.
+- **Cost estimation**: real-time token tracking with pricing for 30+ models (OpenAI, Anthropic, Moonshot) updated to March 2026. Per-run cost caps with automatic abort.
 - **Provider role overrides**: use different models for different tasks — a cheap model for background actors, a powerful one for analysis, another for the operator.
 - **Portable actors**: export evolved agents with beliefs, memories, and decision traces, then import them into another run.
 - **Single-file audit trail**: runs, rounds, posts, search cache, telemetry, and reports all anchor back to SQLite.
@@ -162,18 +163,21 @@ Brief ──→ Spec Design ──→ Source Downloads ──→ Cast Design
                                                           Simulation Engine
                                                           ┌─────────────────┐
                                                           │ Activation      │
-                                                          │ Feed            │
-                                                          │ Search          │
-                                                          │ Cognition       │
+                                                          │ Feed + TwHIN    │
+                                                          │ Search (web)    │
+                                                          │ Cognition (3T)  │
                                                           │ Propagation     │
                                                           │ Fatigue         │
                                                           │ Events          │
                                                           │ Memory          │
+                                                          │ Round Evaluator │
+                                                          │ Temporal Memory │
                                                           └─────────────────┘
                                                                 │
-                                                     ┌──────────┼──────────┐
-                                                     ▼          ▼          ▼
-                                                  Report    Interview    Export
+                                                  ┌─────────────┼─────────────┐
+                                                  ▼             ▼             ▼
+                                               Report     Investigate     Export
+                                                          (ReACT loop)
 ```
 
 The design layer uses LLM to propose actors and communities from the brief and source documents. The grounding layer (ingest, graph, profiles) uses LLM for ontology extraction and profile generation, but graph construction, entity resolution, community assignment, and the simulation runtime are deterministic and auditable. Everything is persisted in SQLite. More detail lives in [docs/architecture.md](docs/architecture.md).
@@ -220,20 +224,24 @@ The design layer uses LLM to propose actors and communities from the brief and s
 
 PublicMachina is actively evolving. The current engine ships with grounded agents, replay/resume, 3-tier cognition, a conversational operator, round quality evaluation, resilient LLM execution, and investigative reporting.
 
-### Already implemented (feature-flagged)
+### Already implemented
 
-- **Temporal memory infrastructure** — episode derivation, outbox pattern, retrieval with per-tier context budgets, and fallback. Graphiti provider ready for FalkorDB integration.
-- **Feed realism** — TwHIN-BERT social-representation embeddings as an additional ranking signal (`social-hybrid` and `twhin-hybrid` algorithms). Requires `@huggingface/transformers`.
-- **Cast enrichment** — 2-step LLM entity validation (extract + judge with few-shot calibration), graph-backed type validation, community-influenced follow/sentiment.
-- **Round evaluator** — independent quality scoring per round (diversity, evolution, consistency, conflict) with corrective guidance injection. Enabled by default.
-- **Resilience layer** — retry with backoff, idle fallback, optional JSON repair, failure message persistence.
+- **LLM-first planner** — all routing decisions made by the LLM, not regex. Language-agnostic: works in English, Spanish, or any language. No hardcoded keywords.
+- **Temporal memory infrastructure** — episode derivation (11 types including quotes and opinion changes), outbox pattern with async flush, retrieval with per-tier context budgets, and graceful fallback. FalkorDB provider connected and tested with real graph writes (961+ nodes, 0 sync errors).
+- **Feed realism** — TwHIN-BERT social-representation embeddings as an additional ranking signal (`social-hybrid` and `twhin-hybrid` algorithms). Runs locally on CPU via `@huggingface/transformers`.
+- **Cast enrichment** — 2-step LLM entity validation (extract with grounding + judge with balanced examples), graph-backed type validation with auto-creation of missing types, community-influenced follow/sentiment.
+- **Round evaluator** — independent quality scoring per round (diversity, evolution, consistency, conflict) with corrective guidance injected into the next round (Generator-Evaluator pattern). Enabled by default.
+- **Resilience layer** — 3-attempt retry with exponential backoff, idle fallback for unrecoverable errors, optional JSON repair (mechanical + LLM-assisted), failure message persisted in SQLite.
 - **ReportAgent** — ReACT-style investigative reports via `investigate` command.
-- **Sprint decomposition** — narrative checkpoints for runs >10 rounds.
+- **Sprint decomposition** — narrative checkpoints for runs >10 rounds with inter-sprint evaluation.
+- **Cost estimation** — real-time token tracking with pricing for 30+ models updated to March 2026, per-run cost caps.
+- **Protection telemetry** — tracks how often each safeguard fires (retries, repairs, fallbacks) to inform progressive simplification.
+- **Evaluation framework** — 5 benchmark scenarios, 10 formal metrics, metric extractor with A/B comparison. Graphiti evaluation completed (conditional GO).
 
 ### Next priorities
 
-- **Graphiti spike** — connect the temporal memory provider to FalkorDB and validate whether graph-based memory improves agent coherence.
-- **Evaluation framework** — 5 benchmark scenarios with 10 formal metrics for A/B comparison of memory, feed, and cast variants.
+- **Graphiti memory evaluation** — validate whether temporal graph context measurably improves agent coherence across the 5 benchmark scenarios.
+- **Brief-to-spec via LLM parsing** — replace the remaining label-based brief parser with full LLM extraction for maximum language and format flexibility.
 
 All changes are gated behind formal evaluation: no new layer becomes default unless it measurably improves simulation quality without breaking cost or latency constraints. Full plan, architecture decisions, phases, risks, and success criteria live in [PLAN_PRODUCT_EVOLUTION.md](PLAN_PRODUCT_EVOLUTION.md).
 
