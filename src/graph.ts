@@ -255,6 +255,16 @@ export async function buildKnowledgeGraph(
     entityMap = await validateEntitiesWithLLM(entityMap, llm, sourceText);
   }
 
+  // 3c. Ensure all entity types exist in entity_types table (prevents FK failures)
+  const discoveredTypes = new Set<string>();
+  for (const [, rawEntity] of entityMap) {
+    if (!entityTypeNames.has(rawEntity.type)) discoveredTypes.add(rawEntity.type);
+  }
+  for (const typeName of discoveredTypes) {
+    store.addEntityType({ name: typeName, description: `Auto-created from cast-design hint or LLM extraction` });
+    entityTypeNames.add(typeName);
+  }
+
   // 4. Create entities in DB
   let entitiesCreated = 0;
   const nameToEntityId = new Map<string, string>();
